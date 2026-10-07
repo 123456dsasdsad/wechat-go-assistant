@@ -1,0 +1,8 @@
+assistant.example.invalid {
+    handle /wechat-files/* {
+        reverse_proxy 127.0.0.1:17444
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

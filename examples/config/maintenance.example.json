@@ -1,0 +1,7 @@
+{
+  "host": "campus",
+  "root": "/home/worker/campus-stack/maintenance",
+  "relay_url": "http://127.0.0.1:17441",
+  "key_file": "/home/worker/campus-stack/secrets/relay.key",
+  "programs": []
+}

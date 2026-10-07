@@ -1,0 +1,13 @@
+{
+  "relay_url": "http://127.0.0.1:17441",
+  "relay_key_file": "/home/worker/campus-stack/secrets/relay.key",
+  "api_key_file": "/home/worker/campus-stack/secrets/cockpit-client.key",
+  "codex_binary": "/home/worker/campus-stack/codex/codex",
+  "codex_home": "/home/worker/campus-stack/codex-home",
+  "work_root": "/home/worker/campus-stack/tasks",
+  "models_file": "/home/worker/campus-stack/config/models.json",
+  "threads_file": "/home/worker/campus-stack/data/threads.json",
+  "permissions": ":danger-full-access",
+  "turn_timeout_seconds": 43200,
+  "live_steering": true
+}

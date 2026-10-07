@@ -1,0 +1,18 @@
+# Copy to the dedicated CODEX_HOME/config.toml after checking CLI compatibility.
+model = "gpt-6-sol"
+model_provider = "cockpit"
+model_reasoning_effort = "high"
+default_permissions = ":danger-full-access"
+approval_policy = "never"
+
+[model_providers.cockpit]
+name = "Private account gateway"
+base_url = "http://127.0.0.1:18317/v1"
+wire_api = "responses"
+env_key = "COCKPIT_API_KEY"
+requires_openai_auth = false
+supports_websockets = false
+
+[shell_environment_policy]
+inherit = "core"
+exclude = ["COCKPIT_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY"]

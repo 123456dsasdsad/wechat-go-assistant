@@ -1,0 +1,6 @@
+{
+  "models": [
+    {"id": "gpt-6-sol", "efforts": ["low", "medium", "high"], "default_effort": "high"},
+    {"id": "gpt-6-luna", "efforts": ["low", "medium", "high"], "default_effort": "low"}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "state_path": "/opt/wechat-go/data/weixin.json",
+  "jobs_dir": "/opt/wechat-go/data/relay/jobs",
+  "key_file": "/opt/wechat-go/secrets/relay.key",
+  "listen": "127.0.0.1:17440",
+  "models_file": "/opt/wechat-go/config/models.json",
+  "settings_file": "/opt/wechat-go/data/relay/settings.json",
+  "files_dir": "/opt/wechat-go/data/relay/files",
+  "upload_listen": "127.0.0.1:17444",
+  "public_url": "https://assistant.example.invalid/wechat-files/",
+  "conversations_file": "/opt/wechat-go/data/relay/conversations.json",
+  "outputs_dir": "/opt/wechat-go/data/relay/outputs"
+}

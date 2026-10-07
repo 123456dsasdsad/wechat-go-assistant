@@ -1,0 +1,17 @@
+[Unit]
+Description=WeChat Go Assistant Worker
+After=network-online.target campus-ai-private-tunnel.service
+Wants=network-online.target campus-ai-private-tunnel.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/worker/campus-stack
+ExecStart=/home/worker/campus-stack/bin/worker --config /home/worker/campus-stack/config/worker.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
