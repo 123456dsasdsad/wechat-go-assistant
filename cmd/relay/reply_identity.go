@@ -15,16 +15,17 @@ func questionIdentity(j jobs.Job) string {
 	return fmt.Sprintf("任务 %s · 提问 %s\n原问题：%s", j.ID[:8], j.Created.In(replyZone).Format("01-02 15:04"), conversations.QuestionPreview(j.Input)) + supplementSummary(j)
 }
 func resultText(j jobs.Job, sessions *conversations.Store, outputs *files.Store, origin string) string {
+	sessionHeader := ""
+	if sessions != nil {
+		if session, ok := sessions.Get(j.ConversationID); ok {
+			sessionHeader = fmt.Sprintf("会话 %d · %s\n", session.Number, session.DisplayName())
+		}
+	}
 	text := questionIdentity(j) + "\n" + j.Model + " / " + j.Effort + "\n\n答复：\n" + j.Result
 	if j.Error != "" {
 		text = questionIdentity(j) + "\n处理失败（" + j.Error + "）。"
 		if hint := fileErrorHint(j.Error); hint != "" {
 			text += "\n" + hint
-		}
-	}
-	if sessions != nil {
-		if session, ok := sessions.Get(j.ConversationID); ok {
-			text = fmt.Sprintf("会话 %d · %s\n", session.Number, session.DisplayName()) + text
 		}
 	}
 	if outputs != nil && origin != "" {
@@ -52,7 +53,7 @@ func resultText(j jobs.Job, sessions *conversations.Store, outputs *files.Store,
 			text = header + "\n答复：\n" + answer
 		}
 	}
-	return text
+	return sessionHeader + text
 }
 func pendingMedia(j jobs.Job) bool {
 	if j.Status != "done" || j.MediaDeferred || !j.PartDelivered("text") {

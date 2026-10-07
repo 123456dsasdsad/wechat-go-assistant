@@ -200,7 +200,12 @@ func (s *Store) ordered() []Job {
 	for _, j := range s.items {
 		out = append(out, j)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Created.Before(out[j].Created) })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Created.Equal(out[j].Created) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Created.Before(out[j].Created)
+	})
 	return out
 }
 func (s *Store) Claim(now time.Time) (*Task, error) {
@@ -209,12 +214,17 @@ func (s *Store) Claim(now time.Time) (*Task, error) {
 	if s.maintenanceDrained(now) {
 		return nil, nil
 	}
-	for _, j := range s.ordered() {
+	ordered := s.ordered()
+	active := map[string]bool{}
+	for _, j := range ordered {
 		if j.Status == "running" && now.Before(j.LeaseUntil) {
-			return nil, nil
+			active[j.Owner+"\x00"+j.ConversationID] = true
 		}
 	}
-	for _, j := range s.ordered() {
+	for _, j := range ordered {
+		if active[j.Owner+"\x00"+j.ConversationID] {
+			continue
+		}
 		if j.Status != "queued" && (j.Status != "running" || now.Before(j.LeaseUntil)) {
 			continue
 		}

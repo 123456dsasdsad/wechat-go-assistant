@@ -9,5 +9,6 @@
   "threads_file": "/home/worker/campus-stack/data/threads.json",
   "permissions": ":danger-full-access",
   "turn_timeout_seconds": 43200,
+  "max_concurrent_tasks": 4,
   "live_steering": true
 }

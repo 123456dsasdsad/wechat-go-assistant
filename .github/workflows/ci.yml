@@ -26,6 +26,8 @@ jobs:
           cache: false
       - run: go test -mod=vendor ./...
       - run: go vet -mod=vendor ./...
+      - if: runner.os == 'Linux'
+        run: go test -mod=vendor -race ./cmd/worker ./cmd/relay ./internal/jobs ./internal/conversations
 
   build:
     runs-on: ubuntu-latest

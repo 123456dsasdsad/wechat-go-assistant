@@ -40,6 +40,7 @@ type config struct {
 	TurnTimeoutSeconds int    `json:"turn_timeout_seconds"`
 	PythonBinary       string `json:"python_binary,omitempty"`
 	LiveSteering       bool   `json:"live_steering,omitempty"`
+	MaxConcurrentTasks int    `json:"max_concurrent_tasks,omitempty"`
 }
 
 func main() {
@@ -91,6 +92,10 @@ func run(ctx context.Context) error {
 	if cfg.TurnTimeoutSeconds < 30 || cfg.TurnTimeoutSeconds > 86400 {
 		return errors.New("invalid_turn_timeout")
 	}
+	cfg.MaxConcurrentTasks, e = workerParallelism(cfg.MaxConcurrentTasks)
+	if e != nil {
+		return e
+	}
 	catalog, e := models.Load(cfg.ModelsFile)
 	if e != nil {
 		return e
@@ -122,6 +127,15 @@ func run(ctx context.Context) error {
 	if e != nil {
 		return e
 	}
+	fmt.Printf("{\"type\":\"worker_ready\",\"models\":%d,\"max_concurrent_tasks\":%d}\n", len(catalog.Models), cfg.MaxConcurrentTasks)
+	return runWorkerPool(ctx, cfg.MaxConcurrentTasks, func(loopCtx context.Context) error {
+		return workerLoop(loopCtx, cfg, catalog, threads, relayKey, apiKey)
+	})
+}
+
+// All slots share one synchronized native-thread store. Task state, clients,
+// heartbeats, questions and progress remain local to the execution slot.
+func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads *conversations.Threads, relayKey, apiKey string) error {
 	httpClient := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	call := func(endpoint string, body any, out any) (int, error) {
 		data, e := json.Marshal(body)
@@ -153,7 +167,6 @@ func run(ctx context.Context) error {
 		}
 		return res.StatusCode, nil
 	}
-	fmt.Printf("{\"type\":\"worker_ready\",\"models\":%d}\n", len(catalog.Models))
 	var finishLease context.CancelFunc
 	defer func() {
 		if finishLease != nil {
@@ -161,6 +174,9 @@ func run(ctx context.Context) error {
 		}
 	}()
 	for {
+		if ctx.Err() != nil {
+			return nil
+		}
 		if finishLease != nil {
 			finishLease()
 			finishLease = nil

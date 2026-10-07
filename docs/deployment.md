@@ -51,6 +51,7 @@ ssh -N -T -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
 
 - Relay：复制 [relay.windows.example.json](../examples/config/relay.windows.example.json) 或 [relay.linux.example.json](../examples/config/relay.linux.example.json)。`listen` 必须是 IP 回环地址。`public_url` 是含 `/wechat-files/` 的公开 HTTPS URL。
 - Worker：复制 [worker.example.json](../examples/config/worker.example.json)，填写二进制、私有 Key 文件和任务根目录。`turn_timeout_seconds=43200` 为每轮 12 小时，允许范围 30–86400 秒。
+- `max_concurrent_tasks` 控制一个 Worker 进程的执行位数，省略或设为 0 时默认 4，显式值允许 1–16；设为 1 可恢复单任务运行。Relay 按 owner 和会话原子认领任务，跳过已有有效租约的会话，因此同会话始终顺序执行，其他会话可并行。等待用户回答占一个执行位，达到上限后继续排队。
 - 两端复制相同 [models.example.json](../examples/config/models.example.json)。当前默认初始化需要 `gpt-6-sol/high`；其他项须先通过自己的网关验证。
 - `permissions=":danger-full-access"` 显式使用完整执行权限，操作系统账号仍是最终权限边界。若希望由 Codex 自己管理权限，可删除该字段并审查专用 Codex 配置。
 
@@ -61,7 +62,7 @@ relay --config /private/relay.json
 worker --config /private/worker.json
 ```
 
-Linux Worker 服务见 [systemd 模板](../examples/systemd/campus-wechat-worker.service)，使用 `systemctl --user` 安装到专用账号的用户服务目录。服务可自动重启；不能同时启动两个 Worker 写入同一会话映射。
+Linux Worker 服务见 [systemd 模板](../examples/systemd/campus-wechat-worker.service)，使用 `systemctl --user` 安装到专用账号的用户服务目录。服务可自动重启；并发由单个 Worker 进程内的执行池提供，不能同时启动两个 Worker 写入同一会话映射。各任务独立维护租约、模型、工作目录、过程、提问和回传结果；同一进程共享同步保护的原生线程映射。升级前应取得空闲维护租约，保留正在执行的任务。
 
 ## 5. HTTPS 页面与模型 API
 

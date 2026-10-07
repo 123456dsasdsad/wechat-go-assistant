@@ -27,6 +27,18 @@ func TestTwoQuestionsKeepTheirOwnIdentityAfterNewQuestionAndRename(t *testing.T)
 		t.Fatal("latest question replaced older question", first, second)
 	}
 }
+
+func TestResultPageReplyKeepsOriginalSessionNumberAfterSwitch(t *testing.T) {
+	sessions, _ := conversations.Open(t.TempDir() + "/sessions.json")
+	original := sessions.Current()
+	outputs, _ := files.Open(t.TempDir())
+	j := jobs.Job{ID: strings.Repeat("a", 24), Owner: "owner", ConversationID: original.ID, Input: "原会话任务", Result: "原会话答复", Created: time.Now()}
+	sessions.Handle("switch-result-session", "新建会话 其他会话")
+	text := resultText(j, sessions, outputs, "https://example.com/wechat-files/")
+	if !strings.HasPrefix(text, "会话 1 · ") || strings.Contains(text, "其他会话") || !strings.Contains(text, "完整答复与全部") {
+		t.Fatal("result page response lost its original session", text)
+	}
+}
 func TestSupersededMediaDoesNotInterleaveButCanBeRequested(t *testing.T) {
 	queue, _ := jobs.Open(t.TempDir())
 	outputs, _ := files.Open(t.TempDir())
