@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/steering"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,6 +20,23 @@ func fakeAppServer(mode string) {
 	thread := fakeThread
 	turn := "turn-123"
 	for scan.Scan() {
+		if strings.HasPrefix(mode, "question-") && strings.Contains(scan.Text(), `"answers"`) {
+			var reply struct {
+				ID     json.RawMessage `json:"id"`
+				Result json.RawMessage `json:"result"`
+			}
+			json.Unmarshal(scan.Bytes(), &reply)
+			want := `"question-rpc"`
+			if mode == "question-number" {
+				want = "9007199254740993"
+			}
+			if string(reply.ID) != want || !strings.Contains(string(reply.Result), "SVG") {
+				os.Exit(30)
+			}
+			emit(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": thread, "turnId": turn, "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "human answer received"}}})
+			emit(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": thread, "turn": map[string]string{"id": turn, "status": "completed"}}})
+			continue
+		}
 		var r struct {
 			ID     int
 			Method string
@@ -60,6 +78,13 @@ func fakeAppServer(mode string) {
 			continue
 		}
 		emit(map[string]any{"id": r.ID, "result": result})
+		if strings.HasPrefix(mode, "question-") && r.Method == "turn/start" {
+			var id any = "question-rpc"
+			if mode == "question-number" {
+				id = json.Number("9007199254740993")
+			}
+			emit(map[string]any{"id": id, "method": "item/tool/requestUserInput", "params": map[string]any{"threadId": thread, "turnId": turn, "itemId": "question-item", "isBlocking": true, "autoResolutionMs": 1, "questions": []any{map[string]any{"id": "format", "header": "格式", "question": "选择格式", "options": []any{map[string]string{"label": "SVG", "description": "矢量图"}}}}}})
+		}
 		if mode == "progress" && r.Method == "turn/start" {
 			emit(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"threadId": thread, "turnId": "another-turn", "itemId": "foreign", "delta": "其他任务内容"}})
 			emit(map[string]any{"method": "item/reasoning/textDelta", "params": map[string]any{"threadId": thread, "turnId": turn, "itemId": "private", "delta": "不应显示的推理"}})

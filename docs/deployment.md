@@ -84,3 +84,11 @@ Linux Worker 服务见 [systemd 模板](../examples/systemd/campus-wechat-worker
 ## 7. 验收
 
 依次验证两端私有 health、微信简单任务、同一会话回忆、模型切换、文件 SHA-256、运行中过程文字和显式补发。日志与任务页属于私有运行数据，不要上传到公开 Issue。测试通过仅证明本地协议和调度逻辑，不能替代手机实际收取和账号网关验证。
+
+## 等待用户回答
+
+Worker 会为每次 Codex 运行临时配置纯 Go MCP stdio 工具 `wechat_questions/ask_user`，新的与恢复的会话均可用，无需修改全局 Codex 配置或新增监听端口。Relay 和 Worker 必须一起升级。提问工具超时为 43200 秒，整个任务仍受 `turn_timeout_seconds` 约束；Worker 的独立租约心跳在等待期间继续运行。工具初始化失败时该次运行失败，避免悄悄禁用提问能力。
+
+Relay 使用私有 `/jobs/questions/publish`、`poll`、`resolve` 接口保存提问和回答。微信消息 ID 仅在接口确认发送后关联；回答通过 owner、任务、执行尝试和问题 ID 校验。公共任务页不公开租约、RPC ID 或用户答案。
+
+配置依据：[OpenAI Codex MCP 文档](https://developers.openai.com/codex/mcp)。

@@ -8,6 +8,8 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"net/url"
 	"regexp"
+	"strconv"
+	"strings"
 )
 
 var quotedURL = regexp.MustCompile(`https?://[^\s]+`)
@@ -26,6 +28,26 @@ func withoutLinkCredentials(text string) string {
 }
 func quoteRecorder(cache *quotes.Store, bot string, queue *jobs.Store) func(weixin.Reply, weixin.SendResult, string, bool) {
 	return func(reply weixin.Reply, accepted weixin.SendResult, text string, media bool) {
+		if strings.HasPrefix(reply.ClientID, "go-question-") && accepted.MessageID != "" {
+			parts := strings.Split(strings.TrimPrefix(reply.ClientID, "go-question-"), "-")
+			if len(parts) == 2 {
+				index, e := strconv.Atoi(parts[1])
+				if e == nil {
+					for _, j := range queue.History() {
+						if j.Owner != reply.ToUserID {
+							continue
+						}
+						for _, b := range j.Questions {
+							if b.ID == parts[0] && index > 0 && index <= len(b.Request.Questions) {
+								if queue.RecordQuestionMessage(j.ID, b.ID, b.Request.Questions[index-1].ID, string(accepted.MessageID)) != nil {
+									fmt.Println(`{"type":"question_message_binding_failed"}`)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 		if cache == nil || accepted.MessageID == "" {
 			return
 		}

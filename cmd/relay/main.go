@@ -318,6 +318,7 @@ func run(ctx context.Context) error {
 	if accounts != nil {
 		go activateAccounts(ctx, cfg, key, accounts, reports)
 	}
+	go deliverUserQuestions(ctx, outbound, store)
 	go deliverMaintenance(ctx, outbound, reports, state.Account.OwnerID)
 	go deliver(ctx, outbound, store, sessions, outputStore, cfg.PublicURL)
 	choice := preferences.Current()

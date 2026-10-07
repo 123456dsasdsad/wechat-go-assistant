@@ -37,6 +37,8 @@ func HandlerWithOutputs(s *Store, key string, fileStore, outputStore *files.Stor
 			}
 		}
 		switch {
+		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/jobs/questions/"):
+			s.questionsHTTP(w, r)
 		case r.Method == "POST" && r.URL.Path == "/jobs/progress":
 			var update ProgressUpdate
 			d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20))

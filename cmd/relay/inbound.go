@@ -75,6 +75,9 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	if len(input) > 8192 || len(media) > 4 {
 		return in.reply(ctx, msg, "input", "文字请控制在 8 KiB 内，每个任务最多 4 个文件。")
 	}
+	if handled, e := in.answerUserQuestion(ctx, msg, input, len(media)); handled {
+		return e
+	}
 	if unsupported {
 		return in.reply(ctx, msg, "input", "这类消息暂不能直接读取。合并聊天请发送“转发内容”，打开链接粘贴聊天；压缩包请发送“上传文件”获取手机上传链接。")
 	}

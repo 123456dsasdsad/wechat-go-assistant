@@ -9,6 +9,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/steering"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/userinput"
 	"io"
 	"os"
 	"os/exec"
@@ -21,6 +22,8 @@ type Config struct {
 	Permissions                                           string
 	AppServer                                             bool
 	Steering                                              Steering
+	Questions                                             Questions
+	QuestionMCP                                           *userinput.Connection
 	Progress                                              func(string)
 }
 type Result struct {
@@ -59,6 +62,7 @@ func Run(ctx context.Context, c Config, prompt string) (Result, error) {
 	if c.Permissions != "" {
 		args = append(args, "-c", fmt.Sprintf("default_permissions=%q", c.Permissions), "-c", "approval_policy=\"never\"")
 	}
+	args = append(args, questionArgs(c.QuestionMCP)...)
 	args = append(args, "-")
 	cmd := exec.Command(c.Binary, args...)
 	cmd.Env = []string{}
@@ -69,6 +73,10 @@ func Run(ctx context.Context, c Config, prompt string) (Result, error) {
 		}
 	}
 	cmd.Env = append(cmd.Env, "CODEX_HOME="+c.Home, "COCKPIT_API_KEY="+c.Key)
+	cmd.Env = append(cmd.Env, questionEnv(c.QuestionMCP)...)
+	if c.QuestionMCP != nil {
+		prompt = userinput.Instructions + "\n" + prompt
+	}
 	cmd.Stdin = strings.NewReader(prompt)
 	cmd.Stderr = io.Discard
 	configureProcess(cmd)

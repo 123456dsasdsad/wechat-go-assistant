@@ -7,9 +7,11 @@ import (
 	"errors"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/steering"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/userinput"
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,7 +23,7 @@ type Steering interface {
 	Ack(context.Context, steering.Receipt) error
 }
 type rpcMessage struct {
-	ID     int             `json:"id,omitempty"`
+	ID     json.RawMessage `json:"id,omitempty"`
 	Method string          `json:"method,omitempty"`
 	Params json.RawMessage `json:"params,omitempty"`
 	Result json.RawMessage `json:"result,omitempty"`
@@ -29,7 +31,8 @@ type rpcMessage struct {
 }
 
 func runAppServer(ctx context.Context, c Config, prompt string) (result Result, retErr error) {
-	cmd := exec.Command(c.Binary, "app-server")
+	args := append([]string{"app-server"}, questionArgs(c.QuestionMCP)...)
+	cmd := exec.Command(c.Binary, args...)
 	cmd.Dir = c.Directory
 	cmd.Stderr = io.Discard
 	for _, v := range os.Environ() {
@@ -39,6 +42,7 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 		}
 	}
 	cmd.Env = append(cmd.Env, "CODEX_HOME="+c.Home, "COCKPIT_API_KEY="+c.Key)
+	cmd.Env = append(cmd.Env, questionEnv(c.QuestionMCP)...)
 	configureProcess(cmd)
 	input, e := cmd.StdinPipe()
 	if e != nil {
@@ -96,10 +100,10 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 				if !ok {
 					return nil, errors.New("codex_rpc_eof")
 				}
-				if m.Method != "" && m.ID != 0 {
+				if m.Method != "" && len(m.ID) != 0 {
 					return nil, errors.New("codex_unexpected_request")
 				}
-				if m.ID == id {
+				if string(m.ID) == strconv.Itoa(id) {
 					if len(m.Error) > 0 {
 						return nil, errors.New("codex_rpc_rejected")
 					}
@@ -108,7 +112,7 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 			}
 		}
 	}
-	if _, e = call("initialize", map[string]any{"clientInfo": map[string]string{"name": "campus_wechat_go", "version": "1.0"}}); e != nil {
+	if _, e = call("initialize", map[string]any{"clientInfo": map[string]string{"name": "campus_wechat_go", "version": "1.0"}, "capabilities": map[string]any{"experimentalApi": true}}); e != nil {
 		return result, e
 	}
 	if _, e = input.Write([]byte("{\"method\":\"initialized\",\"params\":{}}\n")); e != nil {
@@ -121,6 +125,9 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 		policy = "dangerFullAccess"
 	}
 	params := map[string]any{"model": c.Model, "cwd": c.Directory, "approvalPolicy": "never", "sandbox": sandbox}
+	if c.QuestionMCP != nil {
+		params["developerInstructions"] = userinput.Instructions
+	}
 	method := "thread/start"
 	if c.ThreadID != "" {
 		method = "thread/resume"
@@ -213,11 +220,31 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 			if !ok {
 				return result, errors.New("codex_rpc_eof")
 			}
-			if m.ID != 0 && m.Method != "" {
-				return result, errors.New("codex_unexpected_request")
+			if len(m.ID) != 0 && m.Method != "" {
+				if m.Method != "item/tool/requestUserInput" || c.Questions == nil {
+					return result, errors.New("codex_unexpected_request")
+				}
+				request, err := nativeQuestionRequest(m.ID, m.Params, thread.Thread.ID, start.Turn.ID)
+				if err != nil {
+					b, _ := json.Marshal(map[string]any{"id": m.ID, "error": map[string]any{"code": -32602, "message": err.Error()}})
+					if _, err = input.Write(append(b, '\n')); err != nil {
+						return result, errors.New("codex_rpc_write_failed")
+					}
+					continue
+				}
+				response, err := c.Questions.Wait(ctx, request)
+				if err != nil {
+					return result, err
+				}
+				b, _ := json.Marshal(map[string]any{"id": m.ID, "result": response})
+				if _, err = input.Write(append(b, '\n')); err != nil {
+					return result, errors.New("codex_rpc_write_failed")
+				}
+				continue
 			}
-			if r, ok := pending[m.ID]; ok {
-				delete(pending, m.ID)
+			if r, ok := pendingID(m.ID, pending); ok {
+				clientID, _ := strconv.Atoi(string(m.ID))
+				delete(pending, clientID)
 				if len(m.Error) > 0 {
 					r.State = "queued"
 				} else {
@@ -274,4 +301,13 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 			}
 		}
 	}
+}
+
+func pendingID(id json.RawMessage, pending map[int]steering.Receipt) (steering.Receipt, bool) {
+	n, e := strconv.Atoi(string(id))
+	if e != nil {
+		return steering.Receipt{}, false
+	}
+	r, ok := pending[n]
+	return r, ok
 }

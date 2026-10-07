@@ -14,6 +14,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/userinput"
 	"io"
 	"net"
 	"net/http"
@@ -42,6 +43,17 @@ type config struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--question-mcp" {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		connection := userinput.Connection{URL: os.Getenv("WECHAT_QUESTION_URL"), Key: os.Getenv("WECHAT_QUESTION_KEY"), JobID: os.Getenv("WECHAT_QUESTION_JOB"), Lease: os.Getenv("WECHAT_QUESTION_LEASE")}
+		if !connection.Valid() {
+			fmt.Fprintln(os.Stderr, "invalid_question_connection")
+			os.Exit(1)
+		}
+		_ = userinput.ServeMCP(ctx, os.Stdin, os.Stdout, connection.Wait)
+		return
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx); err != nil {
@@ -276,8 +288,14 @@ func run(ctx context.Context) error {
 		if cfg.LiveSteering {
 			steering = &relaySteering{url: cfg.RelayURL, key: relayKey, task: task}
 		}
+		workerBinary, executableErr := os.Executable()
+		if executableErr != nil {
+			cancel()
+			return errors.New("worker_executable_unavailable")
+		}
+		questions := &userinput.Connection{URL: cfg.RelayURL, Key: relayKey, JobID: task.ID, Lease: task.Lease, Executable: workerBinary}
 		progress := newRelayProgress(taskCtx, cfg.RelayURL, relayKey, task)
-		result, runErr := codex.Run(runCtx, codex.Config{Binary: cfg.CodexBinary, Home: cfg.CodexHome, Directory: conversationDir, Key: apiKey, Model: task.Model, Effort: task.Effort, Persistent: task.ConversationID != "", ThreadID: nativeThread, Permissions: cfg.Permissions, AppServer: cfg.LiveSteering, Steering: steering, Progress: progress.Publish}, prompt)
+		result, runErr := codex.Run(runCtx, codex.Config{Binary: cfg.CodexBinary, Home: cfg.CodexHome, Directory: conversationDir, Key: apiKey, Model: task.Model, Effort: task.Effort, Persistent: task.ConversationID != "", ThreadID: nativeThread, Permissions: cfg.Permissions, AppServer: cfg.LiveSteering, Steering: steering, Questions: questions, QuestionMCP: questions, Progress: progress.Publish}, prompt)
 		progress.Close()
 		cancel()
 		if ctx.Err() != nil {

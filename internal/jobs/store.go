@@ -19,36 +19,37 @@ import (
 )
 
 type Job struct {
-	ID                   string       `json:"id"`
-	Input                string       `json:"input"`
-	Model                string       `json:"model"`
-	Effort               string       `json:"effort"`
-	Owner                string       `json:"owner"`
-	ReplyContext         string       `json:"reply_context"`
-	Status               string       `json:"status"`
-	Created              time.Time    `json:"created"`
-	Lease                string       `json:"lease,omitempty"`
-	LeaseUntil           time.Time    `json:"lease_until,omitempty"`
-	Attempts             int          `json:"attempts"`
-	Result               string       `json:"result,omitempty"`
-	Progress             string       `json:"progress,omitempty"`
-	ProgressSequence     uint64       `json:"progress_sequence,omitempty"`
-	ProgressUpdated      time.Time    `json:"progress_updated,omitempty"`
-	Error                string       `json:"error,omitempty"`
-	ToolCount            int          `json:"tool_count"`
-	Attachments          []files.Ref  `json:"attachments,omitempty"`
-	ConversationID       string       `json:"conversation_id,omitempty"`
-	LeaseRenewals        int          `json:"lease_renewals,omitempty"`
-	Outputs              []files.Ref  `json:"outputs,omitempty"`
-	DeliveryParts        []string     `json:"delivery_parts,omitempty"`
-	DeliveryText         string       `json:"delivery_text,omitempty"`
-	MediaRequested       bool         `json:"media_requested,omitempty"`
-	MediaDeferred        bool         `json:"media_deferred,omitempty"`
-	MediaReplyContext    string       `json:"media_reply_context,omitempty"`
-	MediaPackage         files.Ref    `json:"media_package,omitempty"`
-	MediaPackageRequired bool         `json:"media_package_required,omitempty"`
-	VerificationOnly     bool         `json:"verification_only,omitempty"`
-	Supplements          []Supplement `json:"supplements,omitempty"`
+	Questions            []UserQuestion `json:"questions,omitempty"`
+	ID                   string         `json:"id"`
+	Input                string         `json:"input"`
+	Model                string         `json:"model"`
+	Effort               string         `json:"effort"`
+	Owner                string         `json:"owner"`
+	ReplyContext         string         `json:"reply_context"`
+	Status               string         `json:"status"`
+	Created              time.Time      `json:"created"`
+	Lease                string         `json:"lease,omitempty"`
+	LeaseUntil           time.Time      `json:"lease_until,omitempty"`
+	Attempts             int            `json:"attempts"`
+	Result               string         `json:"result,omitempty"`
+	Progress             string         `json:"progress,omitempty"`
+	ProgressSequence     uint64         `json:"progress_sequence,omitempty"`
+	ProgressUpdated      time.Time      `json:"progress_updated,omitempty"`
+	Error                string         `json:"error,omitempty"`
+	ToolCount            int            `json:"tool_count"`
+	Attachments          []files.Ref    `json:"attachments,omitempty"`
+	ConversationID       string         `json:"conversation_id,omitempty"`
+	LeaseRenewals        int            `json:"lease_renewals,omitempty"`
+	Outputs              []files.Ref    `json:"outputs,omitempty"`
+	DeliveryParts        []string       `json:"delivery_parts,omitempty"`
+	DeliveryText         string         `json:"delivery_text,omitempty"`
+	MediaRequested       bool           `json:"media_requested,omitempty"`
+	MediaDeferred        bool           `json:"media_deferred,omitempty"`
+	MediaReplyContext    string         `json:"media_reply_context,omitempty"`
+	MediaPackage         files.Ref      `json:"media_package,omitempty"`
+	MediaPackageRequired bool           `json:"media_package_required,omitempty"`
+	VerificationOnly     bool           `json:"verification_only,omitempty"`
+	Supplements          []Supplement   `json:"supplements,omitempty"`
 }
 
 type Task struct {
@@ -99,6 +100,9 @@ func Open(dir string) (*Store, error) {
 		if j.Effort == "" {
 			j.Effort = "high"
 		}
+		if !validSavedQuestions(j) {
+			return nil, errors.New("invalid_saved_questions")
+		}
 		if len(j.Progress) > 256<<10 {
 			return nil, errors.New("invalid_saved_progress")
 		}
@@ -147,7 +151,7 @@ func (s *Store) save(j Job) error {
 	if err = os.Rename(tmp, filepath.Join(s.dir, j.ID+".json")); err != nil {
 		return err
 	}
-	s.items[j.ID] = j
+	s.items[j.ID] = copyQuestions(j)
 	return nil
 }
 func (s *Store) Enqueue(source, input, owner, replyContext string) (Job, error) {
@@ -214,6 +218,7 @@ func (s *Store) Claim(now time.Time) (*Task, error) {
 		if j.Status != "queued" && (j.Status != "running" || now.Before(j.LeaseUntil)) {
 			continue
 		}
+		cancelQuestions(&j)
 		if j.Attempts >= 2 {
 			j.Status = "done"
 			j.Error = "worker_lease_expired"
@@ -304,6 +309,10 @@ func (s *Store) Complete(c Completion, now time.Time) error {
 	if len(c.Result) > 64*1024 || len(c.Error) > 80 || c.ToolCount < 0 || !files.ValidResults(c.Outputs) || (strings.TrimSpace(c.Result) == "" && c.Error == "") {
 		return errors.New("invalid task result")
 	}
+	if c.Error == "" && j.WaitingForUser() {
+		return errors.New("user_answer_required")
+	}
+	cancelQuestions(&j)
 	j.Result = c.Result
 	j.Error = c.Error
 	j.ToolCount = c.ToolCount
@@ -352,6 +361,7 @@ func (s *Store) History() []Job {
 		out[i].Outputs = append([]files.Ref(nil), out[i].Outputs...)
 		out[i].DeliveryParts = append([]string(nil), out[i].DeliveryParts...)
 		out[i].Supplements = append([]Supplement(nil), out[i].Supplements...)
+		out[i] = copyQuestions(out[i])
 	}
 	return out
 }
@@ -363,7 +373,7 @@ func (s *Store) Snapshot(id string) (Job, bool) {
 	j.Outputs = append([]files.Ref(nil), j.Outputs...)
 	j.DeliveryParts = append([]string(nil), j.DeliveryParts...)
 	j.Supplements = append([]Supplement(nil), j.Supplements...)
-	return j, ok
+	return copyQuestions(j), ok
 }
 func (s *Store) Delivered(id string) error {
 	s.mu.Lock()
