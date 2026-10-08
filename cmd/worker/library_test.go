@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"crypto/sha256"
@@ -40,6 +41,9 @@ func TestReviewFailureDoesNotSkipOtherCategories(t *testing.T) {
 		text, _ := json.Marshal(review)
 		cache, _ := json.Marshal(libraryStage{Text: string(text)})
 		os.WriteFile(p, cache, 0600)
+		if topic == "A" {
+			os.WriteFile(strings.TrimSuffix(p, ".json")+"-repair.json", cache, 0600)
+		}
 	}
 	r := libraryRunner{ctx: context.Background(), cfg: config{library: s}, task: jobs.Task{Owner: "owner", Kind: "review_update", LibraryID: "*"}, dir: dir}
 	updated, e := r.reviews()

@@ -254,6 +254,9 @@ func (in *inbound) workspaceSnapshot(owner, query string, archived bool) (map[st
 	return data, nil
 }
 func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath string) (any, error) {
+	if b.Action == "commands" {
+		return lookupCommands(b.Name, b.Input), nil
+	}
 	reply := ""
 	if statePath != "" {
 		s, e := weixin.LoadState(statePath)

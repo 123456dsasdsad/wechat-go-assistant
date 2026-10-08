@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -106,7 +107,7 @@ func (s *Store) Publish(owner string, snap Snapshot, r Review) (Review, error) {
 			return r, errors.New("invalid_review_section")
 		}
 		if sec.Text != "" && len(sec.MaterialIDs) == 0 && sec.Name != "范围与覆盖" {
-			return r, errors.New("review_citation_missing")
+			return r, fmt.Errorf("review_citation_missing: %s", sec.Name)
 		}
 		for _, id := range sec.MaterialIDs {
 			if !allowed[id] {

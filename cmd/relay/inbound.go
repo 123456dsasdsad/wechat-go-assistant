@@ -99,6 +99,9 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		return e
 	}
 	if len(media) == 0 && !quoted {
+		if handled, e := in.helpCommand(ctx, msg, input); handled {
+			return e
+		}
 		if handled, e := in.workspaceCommand(ctx, msg, input); handled {
 			return e
 		}
