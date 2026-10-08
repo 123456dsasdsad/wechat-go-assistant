@@ -1,9 +1,30 @@
 package conversations
 
 import (
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/usage"
 	"path/filepath"
 	"testing"
 )
+
+func TestMissingTurnUsageInvalidatesEarlierBaseline(t *testing.T) {
+	s, e := OpenThreads(filepath.Join(t.TempDir(), "threads.json"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	id := "12345678"
+	thread := "11111111-2222-3333-4444-555555555555"
+	a := Turn{ConversationID: id, JobID: "123456789012345678901234", ThreadID: thread, Text: "answer", Cumulative: usage.Tokens{Available: true, Total: 100}}
+	if e = s.Save(a); e != nil {
+		t.Fatal(e)
+	}
+	b := Turn{ConversationID: id, JobID: "abcdefabcdefabcdefabcdef", ThreadID: thread, Error: "network_failure"}
+	if e = s.Save(b); e != nil {
+		t.Fatal(e)
+	}
+	if s.Usage(id).Available {
+		t.Fatal("old baseline would charge an unmeasured turn to the next task")
+	}
+}
 
 func TestArchiveSearchAndProfilePersistence(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "sessions.json")

@@ -78,7 +78,7 @@ func (s *Threads) Usage(id string) usage.Tokens {
 	defer s.mu.Unlock()
 	for i := len(s.state.Turns) - 1; i >= 0; i-- {
 		v := s.state.Turns[i]
-		if v.ConversationID == id && v.Cumulative.Available {
+		if v.ConversationID == id {
 			return v.Cumulative
 		}
 	}
