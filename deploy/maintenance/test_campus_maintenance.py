@@ -27,8 +27,18 @@ base_url = "http://wrong-table"
 
     def test_retry_refreshes_late_cloud_snapshot_without_forcing_resend(self):
         calls=[]
-        with tempfile.TemporaryDirectory() as root, patch.object(runner,'ROOT',pathlib.Path(root)), patch.object(sys,'argv',['runner','retry']), patch.object(runner,'invoke',side_effect=lambda *args:calls.append(args)):
+        with tempfile.TemporaryDirectory() as root, patch.object(runner,'ROOT',pathlib.Path(root)), patch.object(sys,'argv',['runner','retry']), patch.object(runner,'invoke',side_effect=lambda *args:calls.append(args)), patch.object(runner,'update_requests',return_value=[]):
             runner.run()
         self.assertEqual(calls,[('retry-publish',),('accounts','-if-changed')])
+
+    def test_requested_update_is_completed_only_after_native_runner_success(self):
+        for failed in [False,True]:
+            with tempfile.TemporaryDirectory() as root, patch.object(runner,'ROOT',pathlib.Path(root)), patch.object(sys,'argv',['runner','retry']), patch.object(runner,'invoke'), patch.object(runner,'update_requests',return_value=[{'id':'request'}]), patch.object(runner,'updates',side_effect=RuntimeError('offline') if failed else None) as update, patch.object(runner,'complete_update_request') as complete:
+                if failed:
+                    with self.assertRaises(RuntimeError):runner.run()
+                    complete.assert_not_called()
+                else:
+                    runner.run();complete.assert_called_once_with({'id':'request'})
+                update.assert_called_once()
 
 if __name__=='__main__':unittest.main()

@@ -115,6 +115,23 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 			return in.reply(ctx, msg, "accounts", strings.Join(lines, "\n"))
 		}
 		if in.reports != nil {
+			hosts := []string{"cloud", "campus"}
+			updateRequested := true
+			switch input {
+			case "软件更新", "检查软件更新", "执行软件更新", "更新软件":
+			case "校园软件更新", "更新校园软件":
+				hosts = []string{"campus"}
+			case "云端软件更新", "更新云端软件":
+				hosts = []string{"cloud"}
+			default:
+				updateRequested = false
+			}
+			if updateRequested {
+				if e := in.reports.RequestUpdates(msg.Key(), hosts...); e != nil {
+					return e
+				}
+				return in.reply(ctx, msg, "maintenance", "已安排原生软件更新检查，不调用 AI、不消耗推理 token。最迟下一轮定时检查（15 分钟内）开始；有更新时自动安装，任务忙时延后。完成后主动发送更新结果。发送“软件更新状态”可查看报告。")
+			}
 			kind, handled := "", true
 			switch input {
 			case "用量日报", "token用量", "Token用量":
@@ -126,7 +143,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 					return in.reply(ctx, msg, "maintenance", report.Text)
 				}
 				return in.reply(ctx, msg, "maintenance", "暂时没有校园账号检查报告；每日北京时间 07:00 检查，检查完成后会主动发送明细。")
-			case "更新状态":
+			case "更新状态", "软件更新状态":
 				kind = "updates"
 			case "运维日报":
 			default:

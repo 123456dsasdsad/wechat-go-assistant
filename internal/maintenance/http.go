@@ -15,6 +15,25 @@ func Handler(store *Store, key string) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		switch {
+		case r.Method == "GET" && r.URL.Path == "/maintenance/update-requests":
+			host := r.URL.Query().Get("host")
+			if host != "cloud" && host != "campus" {
+				http.Error(w, "invalid_update_host", 400)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"requests": store.PendingUpdates(host)})
+		case r.Method == "POST" && r.URL.Path == "/maintenance/update-requests/complete":
+			var request struct {
+				Host string `json:"host"`
+				ID   string `json:"id"`
+			}
+			d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+			d.DisallowUnknownFields()
+			if d.Decode(&request) != nil || store.CompleteUpdate(request.Host, request.ID) != nil {
+				http.Error(w, "update_request_rejected", 400)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 		case r.Method == "GET" && r.URL.Path == "/maintenance/release":
 			bridge.ServeHTTP(w, r)
 		case r.Method == "POST" && r.URL.Path == "/maintenance/report":

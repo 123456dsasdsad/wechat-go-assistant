@@ -60,6 +60,19 @@ queue use the same check.
 
 Phone commands: `用量日报`, `账号状态`, `失效账号`, `更新状态`, `运维日报`.
 `校园账号检查` and `校园账号状态` return the campus report directly.
+`软件更新状态` reads the reports; `软件更新` or `检查软件更新` queues a native
+check for both hosts. `校园软件更新` and `云端软件更新` select one host. Requests
+are durable and deduplicated by inbound message and host; the existing retry
+runners consume them within 15 minutes and publish their actual results. No
+prompt, executable or AI job is stored in an update request. Failed execution
+leaves the request pending; busy installation still uses the existing idle lease.
+
+Linux Codex updates install the official musl package, including its matching
+code-mode helper and packaged resources in their official layout. The updater verifies the release SHA-256,
+reported version and required app-server schema before stopping the idle worker.
+It switches the complete binary directory with a recoverable previous copy.
+Windows updates stop matching task wrappers and retry short executable-file
+release delays; an unsuccessful switch retains rollback and health checks.
 They query deterministic reports and do not create AI jobs. WeChat's reply-context
 restriction can reject proactive notification; reports remain stored and queryable.
 Maintenance never requests or unpauses old task images.

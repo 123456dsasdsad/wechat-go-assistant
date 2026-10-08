@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Native maintenance runner. Network artifacts come over the existing tunnel."""
 import contextlib, datetime, fcntl, hashlib, json, os, pathlib, shutil, subprocess, sys, tarfile, urllib.request, urllib.error
+from codex_bundle import stage_bundle,switch_bundle,restore_bundle
 
 ROOT=pathlib.Path('/home/worker/campus-stack/maintenance')
 CONFIG=ROOT/'config.json'
@@ -24,6 +25,16 @@ def idle(cfg):
     key=pathlib.Path(cfg['key_file']).read_text().strip()
     req=urllib.request.Request(cfg['relay_url']+'/maintenance/idle',headers={'Authorization':'Bearer '+key})
     with urllib.request.urlopen(req,timeout=10) as resp:return json.load(resp)['idle']
+
+def update_requests():
+    cfg=json.loads(CONFIG.read_text());key=pathlib.Path(cfg['key_file']).read_text().strip()
+    req=urllib.request.Request(cfg['relay_url']+'/maintenance/update-requests?host=campus',headers={'Authorization':'Bearer '+key})
+    with urllib.request.urlopen(req,timeout=15) as resp:return json.load(resp).get('requests') or []
+
+def complete_update_request(request):
+    cfg=json.loads(CONFIG.read_text());key=pathlib.Path(cfg['key_file']).read_text().strip()
+    req=urllib.request.Request(cfg['relay_url']+'/maintenance/update-requests/complete',data=json.dumps({'host':'campus','id':request['id']}).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
+    with urllib.request.urlopen(req,timeout=15) as resp:json.load(resp)
 
 @contextlib.contextmanager
 def maintenance_lease(cfg):
@@ -65,28 +76,18 @@ def updates():
             if not locked:
                 u['state']='AI 任务运行中，延后自动安装';continue
             if u['name']=='Codex CLI':
-                target=pathlib.Path(u['target']);stage=target.with_name(target.name+'.maintenance-new');backup=target.with_name(target.name+'.maintenance-previous')
-                with tarfile.open(archive,'r:gz') as tf:
-                    members=[m for m in tf.getmembers() if pathlib.PurePosixPath(m.name).name in ('codex','codex-x86_64-unknown-linux-gnu') and m.isfile()]
-                    if len(members)!=1:raise RuntimeError('archive_content_mismatch')
-                    with tf.extractfile(members[0]) as src,stage.open('wb') as dst:shutil.copyfileobj(src,dst,1024*1024)
-                os.chmod(stage,0o700)
-                subprocess.run([str(stage),'--version'],check=True,capture_output=True,timeout=15)
-                # Check required app-server API schemas without invoking a model.
-                schema=ROOT/'schema-check';schema.mkdir(exist_ok=True)
-                subprocess.run([str(stage),'app-server','generate-json-schema','--out',str(schema)],check=True,capture_output=True,timeout=30)
-                protocol=''.join(f.read_text(errors='replace') for f in schema.rglob('*.json'))
-                if not all(s in protocol for s in ['turn/steer','thread/resume','turn/start']):raise RuntimeError('required_protocol_missing')
+                target=pathlib.Path(u['target']);backup=None
+                bundle=stage_bundle(archive,target,ROOT,u['latest'])
                 if not idle(cfg):u['state']='AI 任务运行中，延后自动安装';continue
                 unit('stop','campus-wechat-worker.service')
                 try:
                     # Service is stopped before switching; an in-flight task is never killed.
                     if not idle(cfg):raise RuntimeError('job_started_during_update')
-                    shutil.copy2(target,backup);os.replace(stage,target)
+                    backup=switch_bundle(bundle,target)
                     unit('start','campus-wechat-worker.service')
                     unit('is-active','--quiet','campus-wechat-worker.service')
                 except Exception:
-                    if backup.exists():shutil.copy2(backup,target)
+                    if backup is not None:restore_bundle(target,backup)
                     unit('start','campus-wechat-worker.service');raise
             elif u['name'] in ('Cockpit Tools','Clash Verge Rev'):
                 install_deb(archive)
@@ -119,13 +120,18 @@ def run():
                 except Exception as ex:failures.append(type(ex).__name__)
             if failures:raise RuntimeError('morning_step_failed')
         elif action=='usage':invoke('usage')
+        elif action=='updates':updates()
         elif action=='retry':
             invoke('retry-publish')
             # Cloud checks may finish after the campus 07:00 timer. Publish a
             # follow-up only when the shared source or campus connectivity changes.
             invoke('accounts','-if-changed')
+            requested=update_requests()
+            if requested:
+                updates()
+                for request in requested:complete_update_request(request)
             last=ROOT/'updates-result.json'
-            if last.exists() and any(u['state']=='AI 任务运行中，延后自动安装' for u in json.loads(last.read_text())) and idle(json.loads(CONFIG.read_text())):updates()
+            if not requested and last.exists() and any(u['state']=='AI 任务运行中，延后自动安装' for u in json.loads(last.read_text())) and idle(json.loads(CONFIG.read_text())):updates()
         else:raise RuntimeError('unknown_action')
         atomic(ROOT/('last-'+action+'.json'),{'ok':True,'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()})
 

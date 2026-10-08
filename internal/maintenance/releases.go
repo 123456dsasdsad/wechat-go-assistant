@@ -195,7 +195,10 @@ func (f Fetcher) Stage(ctx context.Context, programs []Program, dir string) ([]U
 			}
 		}
 		if len(candidates) != 1 {
-			u.State = "更新资产不唯一，保留现版"
+			u.State = "找到多个匹配安装包，保留现版"
+			if len(candidates) == 0 {
+				u.State = "未找到匹配系统架构的安装包，保留现版"
+			}
 			updates = append(updates, u)
 			continue
 		}
@@ -212,6 +215,17 @@ func (f Fetcher) Stage(ctx context.Context, programs []Program, dir string) ([]U
 			continue
 		}
 		path := filepath.Join(dir, a.Name)
+		// Reuse a staged release only after rechecking its official digest.
+		if cached, err := os.Open(path); err == nil {
+			h := sha256.New()
+			n, readErr := io.Copy(h, io.LimitReader(cached, a.Size+1))
+			cached.Close()
+			if readErr == nil && n == a.Size && hex.EncodeToString(h.Sum(nil)) == expected {
+				u.Archive, u.SHA256, u.State = path, expected, "已校验，等待安装"
+				updates = append(updates, u)
+				continue
+			}
+		}
 		body, _, e = f.Get(ctx, a.URL)
 		if e != nil {
 			u.State = "下载失败，保留现版"

@@ -24,6 +24,17 @@ function Test-Idle {
   if($taskJob.status -eq 'running'){return $false}
  };return $true
 }
+function Apply-RequestedUpdates {
+ $taskCfg=Get-Content -Raw -Encoding UTF8 $taskConfig|ConvertFrom-Json;$taskKey=[IO.File]::ReadAllText($taskCfg.key_file).Trim()
+ $taskResponse=Invoke-RestMethod ($taskCfg.relay_url+'/maintenance/update-requests?host=cloud') -Headers @{Authorization=('Bearer '+$taskKey)} -TimeoutSec 15
+ $taskRequests=@($taskResponse.requests|Where-Object{$_})
+ if(!$taskRequests.Count){return $false}
+ Apply-Updates
+ foreach($taskRequest in $taskRequests){
+  $null=Invoke-RestMethod ($taskCfg.relay_url+'/maintenance/update-requests/complete') -Method POST -Headers @{Authorization=('Bearer '+$taskKey)} -ContentType 'application/json' -Body (@{host='cloud';id=$taskRequest.id}|ConvertTo-Json -Compress) -TimeoutSec 15
+ }
+ return $true
+}
 function Lease([string]$taskAction,[string]$taskID='') {
  $taskCfg=Get-Content -Raw -Encoding UTF8 $taskConfig|ConvertFrom-Json;$taskKey=[IO.File]::ReadAllText($taskCfg.key_file).Trim()
  try{return Invoke-RestMethod ($taskCfg.relay_url+'/maintenance/lease') -Method POST -Headers @{Authorization=('Bearer '+$taskKey)} -ContentType 'application/json' -Body (@{Action=$taskAction;Lease=$taskID}|ConvertTo-Json) -TimeoutSec 15}
@@ -35,12 +46,27 @@ function Restart-OwnedTask([string]$taskName,[string]$taskBinary) {
  finally{$null=Enable-ScheduledTask -TaskName $taskName;Start-ScheduledTask -TaskName $taskName}
 }
 function Stop-OwnedTask([string]$taskName,[string]$taskBinary) {
+ $taskDefinition=Get-ScheduledTask -TaskName $taskName
+ $taskWrappers=@()
+ foreach($taskCandidate in @(Get-CimInstance Win32_Process|Where-Object{$_.Name -in @('cmd.exe','powershell.exe','pwsh.exe')})){
+  foreach($taskAction in $taskDefinition.Actions){
+   if($taskAction.Arguments.Length -gt 8 -and [IO.Path]::GetFileName($taskAction.Execute) -eq $taskCandidate.Name -and $taskCandidate.CommandLine -and $taskCandidate.CommandLine.IndexOf($taskAction.Arguments,[StringComparison]::OrdinalIgnoreCase) -ge 0){$taskWrappers+=$taskCandidate.ProcessId;break}
+  }
+ }
  Stop-ScheduledTask -TaskName $taskName
+ foreach($taskWrapperPID in $taskWrappers){Stop-Process -Id $taskWrapperPID -Force -ErrorAction SilentlyContinue;Wait-Process -Id $taskWrapperPID -Timeout 5 -ErrorAction SilentlyContinue}
  foreach($taskProcess in @(Get-Process|Where-Object{$_.Path -eq $taskBinary})){
   Stop-Process -Id $taskProcess.Id -Force -ErrorAction SilentlyContinue
   Wait-Process -Id $taskProcess.Id -Timeout 10 -ErrorAction SilentlyContinue
   $taskRemaining=Get-Process -Id $taskProcess.Id -ErrorAction SilentlyContinue
   if($taskRemaining -and !$taskRemaining.HasExited){throw 'owned_process_did_not_stop'}
+ }
+}
+function Copy-ManagedBinary([string]$taskSource,[string]$taskDestination) {
+ # Windows may retain a loaded executable briefly after its process exits.
+ for($taskCopyAttempt=0;$taskCopyAttempt -lt 10;$taskCopyAttempt++){
+  try{Copy-Item -LiteralPath $taskSource -Destination $taskDestination -Force;return}
+  catch [IO.IOException]{if($taskCopyAttempt -eq 9){throw};Start-Sleep -Milliseconds 500}
  }
 }
 function Test-Gateway {
@@ -87,7 +113,7 @@ function Apply-Updates {
    try {
     if($taskService){$null=Disable-ScheduledTask -TaskName $taskService;Stop-OwnedTask $taskService $taskTarget}
     $taskInstallStage='replace'
-    Copy-Item -LiteralPath $taskNew -Destination $taskTarget -Force
+    Copy-ManagedBinary $taskNew $taskTarget
     $taskInstallStage='start'
     if($taskService){$null=Enable-ScheduledTask -TaskName $taskService;Start-ScheduledTask -TaskName $taskService}
     $taskInstallStage='health'
@@ -102,7 +128,7 @@ function Apply-Updates {
    }catch{
     $taskFailureCategory=$_.Exception.GetType().Name
     if($taskService){Stop-OwnedTask $taskService $taskTarget}
-    Copy-Item -LiteralPath $taskBackup -Destination $taskTarget -Force
+    Copy-ManagedBinary $taskBackup $taskTarget
     Copy-Item -LiteralPath ($taskConfig+'.maintenance-previous') -Destination $taskConfig -Force
     $taskUpdate.state='更新失败，已回滚（'+$taskInstallStage+'/'+$taskFailureCategory+'）'
    }finally{if($taskService){$null=Enable-ScheduledTask -TaskName $taskService;Start-ScheduledTask -TaskName $taskService}}
@@ -137,7 +163,7 @@ try{
   'updates'{Apply-Updates}
   'accounts'{Check-Accounts}
   'usage'{$null=Invoke-Maintenance 'usage'}
-  'retry'{$null=Invoke-Maintenance 'retry-publish';if(Test-Path (Join-Path $taskRoot 'accounts-pending.flag')){Check-Accounts};$taskStaged=Join-Path $taskRoot 'updates-result.json';if(Test-Path $taskStaged){$taskLast=Get-Content -Raw -Encoding UTF8 $taskStaged|ConvertFrom-Json;if(@($taskLast|Where-Object{$_.state -eq 'AI 任务运行中，延后自动安装'}).Count -and (Test-Idle)){Apply-Updates}}}
+  'retry'{$null=Invoke-Maintenance 'retry-publish';$taskRequested=Apply-RequestedUpdates;if(Test-Path (Join-Path $taskRoot 'accounts-pending.flag')){Check-Accounts};$taskStaged=Join-Path $taskRoot 'updates-result.json';if(!$taskRequested -and (Test-Path $taskStaged)){$taskLast=Get-Content -Raw -Encoding UTF8 $taskStaged|ConvertFrom-Json;if(@($taskLast|Where-Object{$_.state -eq 'AI 任务运行中，延后自动安装'}).Count -and (Test-Idle)){Apply-Updates}}}
  }
  [IO.File]::WriteAllText((Join-Path $taskRoot ('last-'+$Action+'.json')),(@{ok=$true;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 }catch{

@@ -13,13 +13,16 @@ func TestMaintenanceCommandsNeverEnqueueAI(t *testing.T) {
 	in.reports, _ = maintenance.Open(t.TempDir())
 	in.reports.Put(maintenance.NewReport("cloud", "usage", "2026-10-06", "verified daily tokens"))
 	in.reports.Put(maintenance.NewReport("campus", "accounts", "2026-10-06", "masked campus pool details"))
-	for _, input := range []string{"用量日报", "运维日报", "账号状态", "更新状态", "校园账号检查", "校园帐号状态"} {
+	for _, input := range []string{"用量日报", "运维日报", "账号状态", "更新状态", "软件更新状态", "软件更新", "校园软件更新", "云端软件更新", "校园账号检查", "校园帐号状态"} {
 		if e := in.handle(context.Background(), textMessage(input, input)); e != nil {
 			t.Fatal(e)
 		}
 	}
 	if len(in.queue.History()) != 0 {
 		t.Fatal("maintenance triggered inference")
+	}
+	if len(in.reports.PendingUpdates("cloud")) != 2 || len(in.reports.PendingUpdates("campus")) != 2 {
+		t.Fatal("native update request not persisted")
 	}
 	if !strings.Contains(in.client.(*fakeMessages).text, "masked campus pool details") {
 		t.Fatal("campus command did not return actual report")

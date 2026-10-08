@@ -159,9 +159,13 @@ func run() error {
 			return errors.New("update_result_invalid")
 		}
 		var out strings.Builder
-		fmt.Fprintf(&out, "【软件更新｜%s 07:00｜%s】", day, cfg.Host)
+		hostName := "阿里云"
+		if cfg.Host == "campus" {
+			hostName = "校园"
+		}
+		fmt.Fprintf(&out, "【软件更新｜%s｜%s】\n检查时间：%s（北京时间）", day, hostName, time.Now().In(maintenance.Beijing).Format("2006-01-02 15:04:05"))
 		for _, u := range updates {
-			fmt.Fprintf(&out, "\n%s：%s → %s；%s", u.Name, u.Version, u.Latest, u.State)
+			fmt.Fprintf(&out, "\n\n%s\n版本：%s → %s\n结果：%s", u.Name, u.Version, u.Latest, u.State)
 		}
 		out.WriteString("\n仅更新已纳管软件的稳定版；先校验与备份，任务忙时延后，不自动重启服务器。")
 		text = out.String()
