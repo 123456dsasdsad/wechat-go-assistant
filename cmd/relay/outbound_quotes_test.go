@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/quotes"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"path/filepath"
@@ -15,6 +16,7 @@ func (s *acceptedQuoteSender) SendText(context.Context, weixin.Reply, string) (w
 	return weixin.SendResult{MessageID: "server-id"}, nil
 }
 func TestAcceptedOutboundServerIDIsCachedWithoutLinkCredentials(t *testing.T) {
+	defer metadb.CloseAll()
 	in := quoteFixture(t)
 	sender := &liveResultSender{client: &acceptedQuoteSender{}, contextFor: func(string) (string, error) { return "fresh", nil }, remember: quoteRecorder(in.quotes, "bot", in.queue)}
 	if _, e := sender.SendText(context.Background(), weixin.Reply{ToUserID: "owner"}, "回答 https://example.com/#private-grant https://example.com/result?token=private-key"); e != nil {

@@ -3,6 +3,7 @@ package quotes
 import (
 	"crypto/md5"
 	"fmt"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,7 @@ import (
 )
 
 func TestPersistenceScopeAndExpiry(t *testing.T) {
+	defer metadb.CloseAll()
 	path := filepath.Join(t.TempDir(), "quotes.json")
 	s, e := Open(path)
 	if e != nil {
@@ -37,6 +39,7 @@ func TestPersistenceScopeAndExpiry(t *testing.T) {
 }
 
 func TestPartialSelectsVerifiedOccurrence(t *testing.T) {
+	defer metadb.CloseAll()
 	full := "甲头一尾，甲头二尾，甲头三尾"
 	p := &weixin.PartialText{Start: "头", End: "尾", StartIndex: 1, EndIndex: 1}
 	if text, ok := Partial(full, p); !ok || text != "头二尾" {

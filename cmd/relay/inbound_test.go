@@ -6,6 +6,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/settings"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
@@ -23,6 +24,7 @@ type fakeMessages struct {
 }
 
 func TestImageQuestionBindsAnActualImageAndAcknowledgesOriginalQuestion(t *testing.T) {
+	defer metadb.CloseAll()
 	in := inboundFixture(t)
 	var picture bytes.Buffer
 	png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 2, 2)))
@@ -41,6 +43,7 @@ func TestImageQuestionBindsAnActualImageAndAcknowledgesOriginalQuestion(t *testi
 	}
 }
 func TestTrainingStatusQuestionDoesNotWaitBehindTraining(t *testing.T) {
+	defer metadb.CloseAll()
 	in := inboundFixture(t)
 	in.handle(context.Background(), textMessage("train", "运行长期训练"))
 	in.queue.Claim(time.Now())
@@ -69,6 +72,7 @@ func textMessage(id, input string) weixin.Message {
 	return weixin.Message{MessageID: weixin.ID(id), FromUserID: "owner", ContextToken: "private-context", Type: 1, Items: []weixin.Item{{Type: weixin.TextType, Text: &weixin.TextItem{Text: input}}}}
 }
 func TestDirectFileCreatesRealAttachmentAndReplays(t *testing.T) {
+	defer metadb.CloseAll()
 	in := inboundFixture(t)
 	msg := textMessage("direct", "请读取文件")
 	msg.Items = append(msg.Items, weixin.Item{Type: weixin.FileType, File: &weixin.FileItem{Name: "资料.txt"}})
@@ -91,6 +95,7 @@ func TestDirectFileCreatesRealAttachmentAndReplays(t *testing.T) {
 }
 
 func TestTextTopicAndRenameAreHandledOutsideAI(t *testing.T) {
+	defer metadb.CloseAll()
 	in := inboundFixture(t)
 	ctx := context.Background()
 	if err := in.handle(ctx, textMessage("first-task", "请检查实验数据")); err != nil {
@@ -117,6 +122,7 @@ func TestTextTopicAndRenameAreHandledOutsideAI(t *testing.T) {
 	}
 }
 func TestNumberReplySelectsWithoutAIJob(t *testing.T) {
+	defer metadb.CloseAll()
 	in := inboundFixture(t)
 	for i, input := range []string{"新建会话 论文", "会话列表", "1"} {
 		if err := in.handle(context.Background(), textMessage(string(rune('a'+i)), input)); err != nil {

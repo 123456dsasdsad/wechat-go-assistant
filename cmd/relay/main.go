@@ -7,10 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/accountupload"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/assistant"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/maintenance"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/quotes"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/settings"
@@ -52,6 +54,7 @@ func main() {
 	}
 }
 func run(ctx context.Context) error {
+	defer metadb.CloseAll()
 	path := flag.String("config", "", "private config path")
 	prepareDelivery := flag.String("prepare-delivery", "", "offline: pause old media and prepare a completed task package; Relay must be stopped")
 	flag.Parse()
@@ -168,13 +171,15 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, job := range store.History() {
+	if err = store.Each(func(job jobs.Job) error {
 		if job.Owner == state.Account.OwnerID {
-			if err = recordJob(sessions, job); err != nil {
-				return err
-			}
+			return recordJob(sessions, job)
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
+	defer store.Close()
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return errors.New("private_listener_unavailable")
@@ -213,7 +218,7 @@ func run(ctx context.Context) error {
 				return
 			}
 			idle := true
-			for _, j := range store.History() {
+			for _, j := range store.Active() {
 				if j.Status == "running" {
 					idle = false
 					break
@@ -314,15 +319,20 @@ func run(ctx context.Context) error {
 		j, ok := store.Snapshot(outboundJobID(r.ClientID))
 		return ok && j.Owner == r.ToUserID && j.Status == "done" && !j.MediaDeferred && j.MediaContext() == r.ContextToken
 	}
-	in := &inbound{client: outbound, preferences: preferences, queue: store, files: fileStore, outputs: outputStore, publicURL: cfg.PublicURL, owner: state.Account.OwnerID, sessions: sessions, reports: reports, accounts: accounts, quotes: quoteStore, botID: state.Account.BotID}
+	assistantStore, err := assistant.Open(filepath.Join(filepath.Dir(cfg.JobsDir), "assistant.sqlite"))
+	if err != nil {
+		return err
+	}
+	in := &inbound{assistant: assistantStore, client: outbound, preferences: preferences, queue: store, files: fileStore, outputs: outputStore, publicURL: cfg.PublicURL, owner: state.Account.OwnerID, sessions: sessions, reports: reports, accounts: accounts, quotes: quoteStore, botID: state.Account.BotID}
 	if accounts != nil {
 		go activateAccounts(ctx, cfg, key, accounts, reports)
 	}
+	go runSchedules(ctx, assistantStore, store, sessions, outbound, state.Account.OwnerID)
 	go deliverUserQuestions(ctx, outbound, store)
 	go deliverMaintenance(ctx, outbound, reports, state.Account.OwnerID)
 	go deliver(ctx, outbound, store, sessions, outputStore, cfg.PublicURL)
 	choice := preferences.Current()
-	fmt.Printf("{\"type\":\"relay_ready\",\"model\":%q,\"effort\":%q}\n", choice.Model, choice.Effort)
+	fmt.Printf("{\"type\":\"relay_ready\",\"storage\":\"sqlite-v1\",\"model\":%q,\"effort\":%q}\n", choice.Model, choice.Effort)
 	for {
 		err = client.Drain(ctx, state, in.handle, func(s *weixin.State) error { return weixin.SaveState(cfg.StatePath, s) })
 		if ctx.Err() != nil {
@@ -381,7 +391,7 @@ func deliver(ctx context.Context, client *liveResultSender, store *jobs.Store, s
 	}()
 	defer func() { <-textDone }()
 	for pause(ctx, time.Second) {
-		for _, j := range selectMediaJobs(store.History()) {
+		for _, j := range selectMediaJobs(store.DeliveryHistory()) {
 			if !j.PartDelivered("text") {
 				continue
 			}

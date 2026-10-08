@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -102,6 +103,7 @@ func fakeParallelCodex(fixture string) {
 }
 
 func TestWorkerParallelSessionsAndExplicitNativeResume(t *testing.T) {
+	defer metadb.CloseAll()
 	root := t.TempDir()
 	fixture := filepath.Join(root, "fixture")
 	if err := os.Mkdir(fixture, 0700); err != nil {

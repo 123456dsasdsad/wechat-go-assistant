@@ -6,6 +6,7 @@ import (
 	"context"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"io"
 	"strings"
@@ -14,6 +15,7 @@ import (
 )
 
 func TestCompletePackageContainsEveryOriginalAndKeepsHonestReceipts(t *testing.T) {
+	defer metadb.CloseAll()
 	queue, _ := jobs.Open(t.TempDir())
 	outputs, _ := files.Open(t.TempDir())
 	j, _ := queue.Enqueue("package", "request", "owner", "original-context")
@@ -65,6 +67,7 @@ func TestCompletePackageContainsEveryOriginalAndKeepsHonestReceipts(t *testing.T
 }
 
 func TestMediaNeverBorrowsNewMessageContextOrResumesAfterFailure(t *testing.T) {
+	defer metadb.CloseAll()
 	queue, _ := jobs.Open(t.TempDir())
 	outputs, _ := files.Open(t.TempDir())
 	j, _ := queue.Enqueue("single", "request", "owner", "original-context")
@@ -123,6 +126,7 @@ func TestMediaNeverBorrowsNewMessageContextOrResumesAfterFailure(t *testing.T) {
 }
 
 func TestFutureMultiFileTaskDeliversOneCompletePackageAutomatically(t *testing.T) {
+	defer metadb.CloseAll()
 	queue, _ := jobs.Open(t.TempDir())
 	outputs, _ := files.Open(t.TempDir())
 	j, _ := queue.Enqueue("future", "new task", "owner", "original")
@@ -150,6 +154,7 @@ func TestFutureMultiFileTaskDeliversOneCompletePackageAutomatically(t *testing.T
 }
 
 func TestOrdinaryStatusDoesNotAuthorizeUnfinishedOldImages(t *testing.T) {
+	defer metadb.CloseAll()
 	in := inboundFixture(t)
 	j, _ := in.queue.Enqueue("old", "old task", "owner", "old-context")
 	task, _ := in.queue.Claim(time.Now())
@@ -173,6 +178,7 @@ func TestOrdinaryStatusDoesNotAuthorizeUnfinishedOldImages(t *testing.T) {
 }
 
 func TestPausedFutureTaskStillBuildsCompleteAccessiblePackage(t *testing.T) {
+	defer metadb.CloseAll()
 	queue, _ := jobs.Open(t.TempDir())
 	outputs, _ := files.Open(t.TempDir())
 	j, _ := queue.Enqueue("paused-future", "new task", "owner", "original")
@@ -202,6 +208,7 @@ func TestPausedFutureTaskStillBuildsCompleteAccessiblePackage(t *testing.T) {
 }
 
 func TestLargePackageEntryIsDeliveredInOneShortResultNotification(t *testing.T) {
+	defer metadb.CloseAll()
 	queue, _ := jobs.Open(t.TempDir())
 	outputs, _ := files.Open(t.TempDir())
 	j, _ := queue.Enqueue("large-future", "new task", "owner", "original")

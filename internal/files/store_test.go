@@ -2,6 +2,7 @@ package files
 
 import (
 	"bytes"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"io"
 	"os"
 	"path/filepath"
@@ -38,7 +39,7 @@ func TestOwnerReplayPersistenceAndGrantExpiry(t *testing.T) {
 	if other, _ := s.Grant("owner", "link-1"); other != token {
 		t.Fatal("link replay changed token")
 	}
-	index, _ := os.ReadFile(filepath.Join(root, "index.json"))
+	index, _ := metadb.ReadJSON(filepath.Join(root, "index.json"))
 	if bytes.Contains(index, []byte(token)) {
 		t.Fatal("raw link token persisted")
 	}

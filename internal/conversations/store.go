@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,38 +56,13 @@ func ValidThread(id string) bool {
 	_, err := hex.DecodeString(strings.ReplaceAll(id, "-", ""))
 	return err == nil && id == strings.ToLower(id)
 }
-func writeJSON(path string, value any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
-	b, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".conversations-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	_, err = f.Write(b)
-	if err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return os.Rename(f.Name(), path)
-}
+func writeJSON(path string, value any) error { return metadb.WriteJSON(path, value) }
 func Open(path string) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("conversation_path_required")
 	}
 	s := &Store{path: path, state: selection{Version: 1, Sessions: map[string]Session{}}}
-	b, err := os.ReadFile(path)
+	b, err := metadb.ReadJSON(path)
 	if err == nil {
 		if len(b) > 1<<20 || json.Unmarshal(b, &s.state) != nil || s.state.Version != 1 || s.state.Sessions == nil || len(s.state.Sessions) > 64 || len(s.state.Receipts) > 128 {
 			return nil, errors.New("invalid_conversations")

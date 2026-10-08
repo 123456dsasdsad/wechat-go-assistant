@@ -6,6 +6,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"strings"
 	"testing"
@@ -51,6 +52,7 @@ func startDeliveryForTest(t *testing.T, run func(context.Context)) {
 }
 
 func TestSlowOldMediaDoesNotBlockNewTextResult(t *testing.T) {
+	defer metadb.CloseAll()
 	queue, _ := jobs.Open(t.TempDir())
 	outputs, _ := files.Open(t.TempDir())
 	sessions, _ := conversations.Open(t.TempDir() + "/sessions.json")
@@ -108,6 +110,7 @@ func (s *contextSender) SendFile(_ context.Context, r weixin.Reply, _ string, _ 
 	return weixin.SendResult{}, nil
 }
 func TestRetryUsesFreshContextWithoutUploadingMediaAgain(t *testing.T) {
+	defer metadb.CloseAll()
 	sender := &contextSender{fail: true}
 	current := "first"
 	client := &liveResultSender{client: sender, contextFor: func(string) (string, error) { return current, nil }}

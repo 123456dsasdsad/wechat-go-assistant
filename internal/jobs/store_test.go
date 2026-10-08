@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"encoding/json"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,11 +10,11 @@ import (
 )
 
 func TestOldJobWithoutEffortKeepsHigh(t *testing.T) {
+	defer metadb.CloseAll()
 	dir := t.TempDir()
-	s, _ := Open(dir)
-	j, _ := s.Enqueue("legacy", "text", "owner", "ctx")
+	j := Job{ID: "0123456789abcdef01234567", Model: "gpt-6-sol", Input: "text", Owner: "owner", ReplyContext: "ctx", Status: "queued", Created: time.Now()}
 	path := filepath.Join(dir, j.ID+".json")
-	b, _ := os.ReadFile(path)
+	b, _ := json.Marshal(j)
 	var data map[string]any
 	json.Unmarshal(b, &data)
 	delete(data, "effort")
@@ -30,6 +31,7 @@ func TestOldJobWithoutEffortKeepsHigh(t *testing.T) {
 }
 
 func TestDurableDeduplicationAndLease(t *testing.T) {
+	defer metadb.CloseAll()
 	dir := t.TempDir()
 	s, err := Open(dir)
 	if err != nil {
@@ -74,6 +76,7 @@ func TestDurableDeduplicationAndLease(t *testing.T) {
 	}
 }
 func TestExpiredLeaseCannotOverwriteRetry(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(t.TempDir())
 	j, _ := s.Enqueue("id", "input", "owner", "context")
 	now := time.Now()
@@ -91,6 +94,7 @@ func TestExpiredLeaseCannotOverwriteRetry(t *testing.T) {
 }
 
 func TestHeartbeatSurvivesRestartAndRejectsStaleLease(t *testing.T) {
+	defer metadb.CloseAll()
 	dir := t.TempDir()
 	s, _ := Open(dir)
 	j, _ := s.Enqueue("large-transfer", "input", "owner", "context")

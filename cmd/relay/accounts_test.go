@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/accountupload"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,8 +11,9 @@ import (
 )
 
 func TestAccountUploadCommandNeverCreatesAIJobOrFileGrant(t *testing.T) {
+	defer metadb.CloseAll()
 	for _, command := range []string{"上传账号", "账号上传", "上传帐号", "帐号上传", "上传账户", "账户上传", " 上传 帐号。 ", "/上传帐号", "上传帐号！", "上传\n帐号", "上传　账户？"} {
-		t.Run(command, func(t *testing.T) { checkAccountUploadCommand(t, command) })
+		t.Run(command, func(t *testing.T) { defer metadb.CloseAll(); checkAccountUploadCommand(t, command) })
 	}
 }
 
@@ -56,6 +58,7 @@ func checkAccountUploadCommand(t *testing.T, command string) {
 }
 
 func TestAccountUploadUnavailableNeverFallsBackToAI(t *testing.T) {
+	defer metadb.CloseAll()
 	for _, command := range []string{"上传帐号", "帐号上传状态"} {
 		in := inboundFixture(t)
 		if e := in.handle(context.Background(), textMessage("unavailable", command)); e != nil {
@@ -68,6 +71,7 @@ func TestAccountUploadUnavailableNeverFallsBackToAI(t *testing.T) {
 }
 
 func TestAccountUploadMatchingPreservesOrdinaryPrompt(t *testing.T) {
+	defer metadb.CloseAll()
 	in := inboundFixture(t)
 	prompt := "解释一下上传 帐号的流程？"
 	if e := in.handle(context.Background(), textMessage("ordinary", prompt)); e != nil {

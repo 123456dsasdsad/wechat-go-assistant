@@ -19,10 +19,13 @@ function Invoke-Maintenance([string]$taskAction,[string[]]$taskExtra=@()) {
  }finally{$taskProcess.Dispose()}
 }
 function Test-Idle {
- foreach($taskFile in Get-ChildItem 'C:\CodexStack\wechat-go\data\relay\jobs' -Filter '*.json' -File){
-  $taskJob=Get-Content -Raw -Encoding UTF8 $taskFile.FullName|ConvertFrom-Json
-  if($taskJob.status -eq 'running'){return $false}
- };return $true
+ # After migration the JSON files are backups, not current task state.
+ try {
+  $taskCfg=Get-Content -Raw -Encoding UTF8 $taskConfig|ConvertFrom-Json
+  $taskKey=[IO.File]::ReadAllText($taskCfg.key_file).Trim()
+  $taskIdle=Invoke-RestMethod ($taskCfg.relay_url+'/maintenance/idle') -Headers @{Authorization=('Bearer '+$taskKey)} -TimeoutSec 15
+  return ($taskIdle.idle -eq $true)
+ }catch{return $false}
 }
 function Apply-RequestedUpdates {
  $taskCfg=Get-Content -Raw -Encoding UTF8 $taskConfig|ConvertFrom-Json;$taskKey=[IO.File]::ReadAllText($taskCfg.key_file).Trim()

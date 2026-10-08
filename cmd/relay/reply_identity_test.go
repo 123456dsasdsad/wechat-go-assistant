@@ -6,6 +6,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"strings"
@@ -14,6 +15,7 @@ import (
 )
 
 func TestTwoQuestionsKeepTheirOwnIdentityAfterNewQuestionAndRename(t *testing.T) {
+	defer metadb.CloseAll()
 	sessions, _ := conversations.Open(t.TempDir() + "/sessions.json")
 	cid := sessions.Current().ID
 	now := time.Now()
@@ -29,6 +31,7 @@ func TestTwoQuestionsKeepTheirOwnIdentityAfterNewQuestionAndRename(t *testing.T)
 }
 
 func TestResultPageReplyKeepsOriginalSessionNumberAfterSwitch(t *testing.T) {
+	defer metadb.CloseAll()
 	sessions, _ := conversations.Open(t.TempDir() + "/sessions.json")
 	original := sessions.Current()
 	outputs, _ := files.Open(t.TempDir())
@@ -40,6 +43,7 @@ func TestResultPageReplyKeepsOriginalSessionNumberAfterSwitch(t *testing.T) {
 	}
 }
 func TestSupersededMediaDoesNotInterleaveButCanBeRequested(t *testing.T) {
+	defer metadb.CloseAll()
 	queue, _ := jobs.Open(t.TempDir())
 	outputs, _ := files.Open(t.TempDir())
 	ref, _ := outputs.Save("owner", "figure", "figure.png", strings.NewReader("image"))
@@ -82,6 +86,7 @@ func (s *chunkFailureSender) SendText(_ context.Context, _ weixin.Reply, text st
 	return weixin.SendResult{}, nil
 }
 func TestLongReplyRetryFreezesTextAndDoesNotRepeatFirstChunk(t *testing.T) {
+	defer metadb.CloseAll()
 	dir := t.TempDir()
 	queue, _ := jobs.Open(dir)
 	queue.Enqueue("long", "original question", "owner", "ctx")
@@ -122,6 +127,7 @@ func (s *labelledSender) SendImage(context.Context, weixin.Reply, weixin.Uploade
 	return weixin.SendResult{}, nil
 }
 func TestAnInterveningReplyRestoresTheImageBatchIdentity(t *testing.T) {
+	defer metadb.CloseAll()
 	sender := &labelledSender{}
 	live := &liveResultSender{client: sender, contextFor: func(string) (string, error) { return "fresh", nil }}
 	ctx := context.Background()
@@ -138,6 +144,7 @@ func TestAnInterveningReplyRestoresTheImageBatchIdentity(t *testing.T) {
 }
 
 func TestNewestTextPrecedesOldResultAndMediaWaitsForText(t *testing.T) {
+	defer metadb.CloseAll()
 	queue, _ := jobs.Open(t.TempDir())
 	sessions, _ := conversations.Open(t.TempDir() + "/sessions.json")
 	var ids []string

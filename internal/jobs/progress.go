@@ -19,7 +19,7 @@ func (s *Store) UpdateProgress(u ProgressUpdate, now time.Time) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[u.ID]
+	j, ok := s.lookup(u.ID)
 	if !ok || j.Status != "running" || u.Lease == "" || u.Lease != j.Lease || !now.Before(j.LeaseUntil) {
 		return errors.New("invalid_progress_lease")
 	}

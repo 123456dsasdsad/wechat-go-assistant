@@ -55,4 +55,4 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - run: go build -mod=vendor ./cmd/weixin ./cmd/relay ./cmd/worker ./cmd/maintenance ./cmd/retry
+      - run: go build -mod=vendor ./cmd/weixin ./cmd/relay ./cmd/worker ./cmd/maintenance ./cmd/retry ./cmd/storageprobe

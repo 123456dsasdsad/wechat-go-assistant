@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 )
 
 func TestOutputUploadLeaseIntegrityAndCompletionReplay(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(t.TempDir())
 	s.Enqueue("source", "task", "owner", "reply")
 	task, _ := s.Claim(time.Now())

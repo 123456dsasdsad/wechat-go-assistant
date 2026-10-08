@@ -35,3 +35,22 @@ be tested with the user's authorized account.
   is pure Go and is included in the built executable; it adds no external runtime.
 
 The `dist` release directory includes copies of these notices and licenses.
+
+## SQLite and supporting Go dependencies
+
+`modernc.org/sqlite` v1.39.1 provides the pure Go database driver. Its license
+and SQLite's public-domain notice are preserved in
+`vendor/modernc.org/sqlite/LICENSE` and `SQLITE-LICENSE`.
+
+The following supporting modules are vendored at the versions in `go.mod` and
+`vendor/modules.txt`; their original notices remain alongside their sources:
+
+- `modernc.org/libc`, `modernc.org/mathutil`, `modernc.org/memory`
+- `github.com/dustin/go-humanize`, `github.com/google/uuid`
+- `github.com/mattn/go-isatty`, `github.com/ncruces/go-strftime`
+- `github.com/remyoudompheng/bigfft`
+- `golang.org/x/exp`, `golang.org/x/sys`
+
+Platform archives retain these license files under `licenses/vendor/`,
+including the nested libc notices. No external SQLite or C compiler is
+required for the normal `CGO_ENABLED=0` builds.

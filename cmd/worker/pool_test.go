@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestWorkerParallelismConfiguration(t *testing.T) {
+	defer metadb.CloseAll()
 	for _, value := range []int{0, 1, 4, 16} {
 		got, err := workerParallelism(value)
 		want := value
@@ -27,6 +29,7 @@ func TestWorkerParallelismConfiguration(t *testing.T) {
 }
 
 func TestWorkerPoolStartsAllSlotsAndJoinsOnCancellation(t *testing.T) {
+	defer metadb.CloseAll()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	started := make(chan struct{}, 4)
@@ -67,6 +70,7 @@ func TestWorkerPoolStartsAllSlotsAndJoinsOnCancellation(t *testing.T) {
 }
 
 func TestWorkerPoolFatalErrorCancelsOtherSlots(t *testing.T) {
+	defer metadb.CloseAll()
 	var entered, exited atomic.Int32
 	failure := errors.New("fatal worker fixture")
 	started := make(chan struct{}, 3)

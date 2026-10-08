@@ -3,14 +3,14 @@ package quotes
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"io"
 	"os"
-	"path/filepath"
-	"sort"
 	"sync"
 	"time"
 )
@@ -38,10 +38,10 @@ type state struct {
 	Records map[string]record `json:"records"`
 }
 type Store struct {
-	mu    sync.Mutex
-	path  string
-	state state
-	now   func() time.Time
+	mu   sync.Mutex
+	path string
+	db   *sql.DB
+	now  func() time.Time
 }
 
 func digest(v string) string        { sum := sha256.Sum256([]byte(v)); return hex.EncodeToString(sum[:]) }
@@ -59,26 +59,59 @@ func validContent(c Content) bool {
 	return true
 }
 func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return nil, err
-	}
-	s := &Store{path: path, now: time.Now, state: state{Version: 1, Records: map[string]record{}}}
-	f, e := os.Open(path)
-	if os.IsNotExist(e) {
-		return s, nil
-	}
+	db, e := metadb.Open(path + ".sqlite")
 	if e != nil {
 		return nil, e
 	}
-	defer f.Close()
-	raw, e := io.ReadAll(io.LimitReader(f, maxBytes+1))
-	if e != nil || len(raw) > maxBytes || json.Unmarshal(raw, &s.state) != nil || s.state.Version != 1 || s.state.Records == nil || len(s.state.Records) > maxRecords {
-		return nil, errors.New("invalid_quote_cache")
+	metadb.KeepOpen(db)
+	s := &Store{path: path, db: db, now: time.Now}
+	if _, e = db.Exec(`CREATE TABLE IF NOT EXISTS quotes (key TEXT PRIMARY KEY, scope TEXT NOT NULL, id TEXT NOT NULL, created INTEGER NOT NULL, bytes INTEGER NOT NULL, document BLOB NOT NULL)`); e != nil {
+		return nil, e
 	}
-	for k, r := range s.state.Records {
-		if len(r.Scope) != 64 || len(r.ID) == 0 || len(r.ID) > 256 || k != key(r.Scope, r.ID) || r.Created.IsZero() || !validContent(r.Content) {
+	if _, e = db.Exec("CREATE INDEX IF NOT EXISTS quotes_created ON quotes(created,key)"); e != nil {
+		return nil, e
+	}
+	var marker []byte
+	e = db.QueryRow("SELECT value FROM documents WHERE key='legacy_import_v1'").Scan(&marker)
+	if e == nil {
+		return s, nil
+	}
+	if !errors.Is(e, sql.ErrNoRows) {
+		return nil, e
+	}
+	legacy := state{Version: 1, Records: map[string]record{}}
+	f, e := os.Open(path)
+	if e == nil {
+		raw, readErr := io.ReadAll(io.LimitReader(f, maxBytes+1))
+		f.Close()
+		if readErr != nil || len(raw) > maxBytes || json.Unmarshal(raw, &legacy) != nil || legacy.Version != 1 || legacy.Records == nil || len(legacy.Records) > maxRecords {
+			return nil, errors.New("invalid_quote_cache")
+		}
+	} else if !os.IsNotExist(e) {
+		return nil, e
+	}
+	tx, e := db.Begin()
+	if e != nil {
+		return nil, e
+	}
+	defer tx.Rollback()
+	for k, r := range legacy.Records {
+		if len(r.Scope) != 64 || r.ID == "" || len(r.ID) > 256 || k != key(r.Scope, r.ID) || r.Created.IsZero() || !validContent(r.Content) {
 			return nil, errors.New("invalid_quote_record")
 		}
+		raw, e := json.Marshal(r)
+		if e != nil {
+			return nil, e
+		}
+		if _, e = tx.Exec("INSERT INTO quotes VALUES(?,?,?,?,?,?)", k, r.Scope, r.ID, r.Created.UnixNano(), len(raw), raw); e != nil {
+			return nil, e
+		}
+	}
+	if _, e = tx.Exec("INSERT INTO documents VALUES('legacy_import_v1','complete')"); e != nil {
+		return nil, e
+	}
+	if e = tx.Commit(); e != nil {
+		return nil, e
 	}
 	return s, nil
 }
@@ -88,13 +121,13 @@ func (s *Store) Get(bot, peer, id string) (Content, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.state.Records[key(scope(bot, peer), id)]
-	if !ok || s.now().Sub(r.Created) > retention {
+	var raw []byte
+	e := s.db.QueryRow("SELECT document FROM quotes WHERE key=? AND created>=?", key(scope(bot, peer), id), s.now().Add(-retention).UnixNano()).Scan(&raw)
+	var r record
+	if e != nil || json.Unmarshal(raw, &r) != nil {
 		return Content{}, false
 	}
-	c := r.Content
-	c.Attachments = append([]Attachment(nil), c.Attachments...)
-	return c, true
+	return r.Content, true
 }
 func (s *Store) Put(bot, peer, id string, c Content) error {
 	if s == nil || id == "" {
@@ -105,79 +138,48 @@ func (s *Store) Put(bot, peer, id string, c Content) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	next := state{Version: 1, Records: make(map[string]record)}
-	now := s.now()
-	for k, r := range s.state.Records {
-		if now.Sub(r.Created) <= retention {
-			next.Records[k] = r
-		}
+	tx, e := s.db.Begin()
+	if e != nil {
+		return e
 	}
+	defer tx.Rollback()
+	now := s.now()
 	sc := scope(bot, peer)
 	k := key(sc, id)
-	created := now
-	if old, ok := next.Records[k]; ok {
-		created = old.Created
+	created := now.UnixNano()
+	if _, e = tx.Exec("DELETE FROM quotes WHERE created<?", now.Add(-retention).UnixNano()); e != nil {
+		return e
 	}
-	c.Attachments = append([]Attachment(nil), c.Attachments...)
-	next.Records[k] = record{sc, id, created, c}
-	ordered := make([]string, 0, len(next.Records))
-	for k := range next.Records {
-		ordered = append(ordered, k)
+	var old int64
+	e = tx.QueryRow("SELECT created FROM quotes WHERE key=?", k).Scan(&old)
+	if e == nil {
+		created = old
+	} else if !errors.Is(e, sql.ErrNoRows) {
+		return e
 	}
-	sort.Slice(ordered, func(i, j int) bool {
-		a, b := next.Records[ordered[i]], next.Records[ordered[j]]
-		if a.Created.Equal(b.Created) {
-			return ordered[i] < ordered[j]
-		}
-		return a.Created.Before(b.Created)
-	})
-	// Keep the new record when trimming; eviction never invents a reference.
-	for len(next.Records) > maxRecords {
-		victim := ordered[0]
-		ordered = ordered[1:]
-		if victim != k {
-			delete(next.Records, victim)
-		}
-	}
-	raw, e := json.Marshal(next)
+	r := record{Scope: sc, ID: id, Created: time.Unix(0, created), Content: c}
+	raw, e := json.Marshal(r)
 	if e != nil {
 		return e
 	}
-	for len(raw) > maxBytes && len(ordered) > 0 {
-		victim := ordered[0]
-		ordered = ordered[1:]
-		if victim == k {
-			continue
+	if _, e = tx.Exec("INSERT INTO quotes VALUES(?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET bytes=excluded.bytes,document=excluded.document", k, sc, id, created, len(raw), raw); e != nil {
+		return e
+	}
+	var count, bytes int
+	if e = tx.QueryRow("SELECT count(*),coalesce(sum(bytes),0) FROM quotes").Scan(&count, &bytes); e != nil {
+		return e
+	}
+	for count > maxRecords || bytes > maxBytes {
+		var victim string
+		var size int
+		if e = tx.QueryRow("SELECT key,bytes FROM quotes WHERE key<>? ORDER BY created,key LIMIT 1", k).Scan(&victim, &size); e != nil {
+			return errors.New("quote_cache_full")
 		}
-		delete(next.Records, victim)
-		raw, e = json.Marshal(next)
-		if e != nil {
+		if _, e = tx.Exec("DELETE FROM quotes WHERE key=?", victim); e != nil {
 			return e
 		}
+		count--
+		bytes -= size
 	}
-	if len(raw) > maxBytes {
-		return errors.New("quote_cache_full")
-	}
-	f, e := os.CreateTemp(filepath.Dir(s.path), ".quotes-*")
-	if e != nil {
-		return e
-	}
-	defer os.Remove(f.Name())
-	if e = f.Chmod(0600); e == nil {
-		_, e = f.Write(raw)
-	}
-	if e == nil {
-		e = f.Sync()
-	}
-	ce := f.Close()
-	if e == nil {
-		e = ce
-	}
-	if e == nil {
-		e = os.Rename(f.Name(), s.path)
-	}
-	if e == nil {
-		s.state = next
-	}
-	return e
+	return tx.Commit()
 }

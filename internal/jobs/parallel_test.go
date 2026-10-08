@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ func enqueueParallel(t *testing.T, s *Store, source, owner, cid string) Job {
 }
 
 func TestParallelConversationsPreserveOrderAcrossRestart(t *testing.T) {
+	defer metadb.CloseAll()
 	dir := filepath.Join(t.TempDir(), "jobs")
 	s, _ := Open(dir)
 	a1 := enqueueParallel(t, s, "a1", "owner", "aaaaaaaa")
@@ -62,6 +64,7 @@ func TestParallelConversationsPreserveOrderAcrossRestart(t *testing.T) {
 }
 
 func TestParallelClaimCallersLeaseOneTaskPerConversation(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(filepath.Join(t.TempDir(), "jobs"))
 	for _, cid := range []string{"aaaaaaaa", "bbbbbbbb", "cccccccc"} {
 		for _, suffix := range []string{"1", "2", "3"} {
@@ -104,6 +107,7 @@ func TestParallelClaimCallersLeaseOneTaskPerConversation(t *testing.T) {
 }
 
 func TestParallelExpiredLeaseRetriesBeforeSameConversationFollowup(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(filepath.Join(t.TempDir(), "jobs"))
 	a := enqueueParallel(t, s, "expired-a", "owner", "aaaaaaaa")
 	enqueueParallel(t, s, "followup-a", "owner", "aaaaaaaa")
@@ -131,6 +135,7 @@ func TestParallelExpiredLeaseRetriesBeforeSameConversationFollowup(t *testing.T)
 }
 
 func TestParallelWaitingQuestionDoesNotBlockOtherConversation(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(filepath.Join(t.TempDir(), "jobs"))
 	enqueueParallel(t, s, "waiting", "owner", "aaaaaaaa")
 	now := time.Now()
@@ -152,6 +157,7 @@ func TestParallelWaitingQuestionDoesNotBlockOtherConversation(t *testing.T) {
 }
 
 func TestParallelLegacyLaneIsSequentialPerOwner(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(filepath.Join(t.TempDir(), "jobs"))
 	enqueueParallel(t, s, "legacy1", "owner", "")
 	enqueueParallel(t, s, "legacy2", "owner", "")

@@ -2,6 +2,7 @@ package settings
 
 import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ func catalogFixture() models.Catalog {
 	return models.Catalog{Models: []models.Model{{ID: "gpt-6-sol", Efforts: []string{"low", "high"}, DefaultEffort: "high"}, {ID: "gpt-6-luna", Efforts: []string{"low", "high"}, DefaultEffort: "high"}, {ID: "gpt-6.1-sol", Efforts: []string{"low", "high"}, DefaultEffort: "high"}}}
 }
 func TestCommandsPersistWithoutChangingExistingJob(t *testing.T) {
+	defer metadb.CloseAll()
 	path := filepath.Join(t.TempDir(), "settings.json")
 	s, err := Open(path, catalogFixture())
 	if err != nil {
@@ -42,6 +44,7 @@ func TestCommandsPersistWithoutChangingExistingJob(t *testing.T) {
 	}
 }
 func TestInvalidCommandsAndTemporaryChoice(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(filepath.Join(t.TempDir(), "settings.json"), catalogFixture())
 	for i, cmd := range []string{"默认模型 claude-opus-5-5", "默认模型 --dangerous", "推理强度 ultra", "默认模型"} {
 		handled, _, err := s.Handle(string(rune('a'+i)), cmd)
@@ -62,8 +65,10 @@ func TestInvalidCommandsAndTemporaryChoice(t *testing.T) {
 }
 
 func TestMobileCommandFormats(t *testing.T) {
+	defer metadb.CloseAll()
 	for _, input := range []string{"默认模型gpt-6.1-sol", "默认模型gpt-6-luna", "默认模型：gpt-6-luna", "默认模型:gpt-6-luna", "切换模型为gpt-6-luna", "把模型改为gpt-6-luna", "请将模型切换为 gpt-6-luna。", "默认模型2"} {
 		t.Run(input, func(t *testing.T) {
+			defer metadb.CloseAll()
 			s, _ := Open(filepath.Join(t.TempDir(), "settings.json"), catalogFixture())
 			handled, reply, err := s.Handle("mobile", input)
 			wantModel := "gpt-6-luna"
@@ -81,6 +86,7 @@ func TestMobileCommandFormats(t *testing.T) {
 }
 
 func TestMobileInvalidCommandsNeverBecomeTasks(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(filepath.Join(t.TempDir(), "settings.json"), catalogFixture())
 	for i, input := range []string{"默认模型unknown", "默认模型：claude-opus-5.5", "推理强度ultra", "默认模型gpt-6-luna\n推理强度low", "切换模型为 gpt-6-luna 然后读取文件"} {
 		handled, _, err := s.Handle(string(rune('a'+i)), input)

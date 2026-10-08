@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 )
 
 func TestSupplementOwnershipReplayAndCompletionRace(t *testing.T) {
+	defer metadb.CloseAll()
 	path := filepath.Join(t.TempDir(), "jobs")
 	s, _ := Open(path)
 	choice := models.Choice{Model: "gpt-6-sol", Effort: "high"}
@@ -45,6 +47,7 @@ func TestSupplementOwnershipReplayAndCompletionRace(t *testing.T) {
 	}
 }
 func TestReservedSupplementsNeverReplayOnAmbiguousSend(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(t.TempDir())
 	choice := models.Choice{Model: "gpt-6-sol", Effort: "high"}
 	j, _ := s.EnqueueConversation("a", "initial", "owner", "ctx", choice, nil, "abcdef01")
@@ -68,6 +71,7 @@ func TestReservedSupplementsNeverReplayOnAmbiguousSend(t *testing.T) {
 	}
 }
 func TestCompletionRecoversLostAcceptanceAck(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(t.TempDir())
 	choice := models.Choice{Model: "gpt-6-sol", Effort: "high"}
 	j, _ := s.EnqueueConversation("a", "initial", "owner", "ctx", choice, nil, "abcdef01")
@@ -87,6 +91,7 @@ func TestCompletionRecoversLostAcceptanceAck(t *testing.T) {
 	}
 }
 func TestSteeringHTTPRequiresBearerAndLease(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(t.TempDir())
 	h := Handler(s, "secret")
 	for _, auth := range []string{"", "Bearer secret"} {
@@ -105,6 +110,7 @@ func TestSteeringHTTPRequiresBearerAndLease(t *testing.T) {
 }
 
 func TestIdleSupplementReplayDoesNotSteerItsOwnQueuedFollowup(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(t.TempDir())
 	choice := models.Choice{Model: "gpt-6-sol", Effort: "high"}
 	first, _, active, e := s.SupplementMessage("idle-message", "do this", "owner", "ctx", "abcdef01", choice)

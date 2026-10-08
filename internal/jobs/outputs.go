@@ -25,7 +25,7 @@ func sameOutputs(a, b []files.Ref) bool {
 func (s *Store) OutputOwner(id, lease string, now time.Time, completed bool) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[id]
+	j, ok := s.lookup(id)
 	if !ok || lease == "" || j.Lease != lease {
 		return "", errors.New("invalid_output_lease")
 	}
@@ -48,7 +48,7 @@ func (j Job) PartDelivered(part string) bool {
 func (s *Store) CommitPart(id, part string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[id]
+	j, ok := s.lookup(id)
 	if !ok || j.Status != "done" {
 		return errors.New("job_not_ready")
 	}
@@ -81,7 +81,7 @@ func (s *Store) CommitPart(id, part string) error {
 func (s *Store) PrepareDeliveryText(id, text string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[id]
+	j, ok := s.lookup(id)
 	if !ok || j.Status != "done" {
 		return "", errors.New("job_not_ready")
 	}
@@ -107,7 +107,7 @@ func (s *Store) RequestMedia(owner, prefix string, replyContext ...string) (Job,
 		return Job{}, errors.New("invalid_job_prefix")
 	}
 	var found *Job
-	for _, j := range s.items {
+	for _, j := range s.query("owner=? AND id LIKE ?", owner, prefix+"%") {
 		if j.Owner == owner && strings.HasPrefix(j.ID, prefix) {
 			if found != nil {
 				return Job{}, errors.New("ambiguous_job_prefix")
@@ -124,7 +124,7 @@ func (s *Store) RequestMedia(owner, prefix string, replyContext ...string) (Job,
 	if len(replyContext) > 0 {
 		found.MediaReplyContext = replyContext[0]
 	}
-	for _, j := range s.items {
+	for _, j := range s.query("owner=? AND status='done' AND outputs>0", owner) {
 		if j.Owner == owner && j.ID != found.ID && j.Status == "done" && len(j.Outputs) > 0 {
 			j.MediaDeferred = true
 			j.MediaRequested = false
@@ -163,7 +163,7 @@ func (j Job) PackageDelivered() bool {
 func (s *Store) SetMediaPackage(id string, ref files.Ref) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[id]
+	j, ok := s.lookup(id)
 	if !ok || (j.Status != "done" && j.Status != "delivered") || !files.ValidRef(ref) {
 		return errors.New("invalid_media_package")
 	}
@@ -182,7 +182,7 @@ func (s *Store) SetMediaPackage(id string, ref files.Ref) error {
 func (s *Store) PauseOwnerMedia(owner string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, j := range s.items {
+	for _, j := range s.query("owner=? AND status='done' AND outputs>0", owner) {
 		if j.Owner != owner || j.Status != "done" || !hasPendingMedia(j) || j.MediaDeferred {
 			continue
 		}
@@ -198,7 +198,7 @@ func (s *Store) PauseOwnerMedia(owner string) error {
 func (s *Store) DeferMedia(id, expectedContext string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[id]
+	j, ok := s.lookup(id)
 	if !ok {
 		return errors.New("unknown_media_job")
 	}
@@ -214,7 +214,7 @@ func (s *Store) DeferMedia(id, expectedContext string) error {
 func (s *Store) MarkVerification(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[id]
+	j, ok := s.lookup(id)
 	if !ok {
 		return errors.New("unknown_verification_job")
 	}

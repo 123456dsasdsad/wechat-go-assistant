@@ -124,7 +124,7 @@ func (s *Store) FindQuotedQuestion(owner, messageID string) (Job, UserQuestion, 
 	if messageID == "" {
 		return Job{}, UserQuestion{}, 0, false
 	}
-	for _, j := range s.items {
+	for _, j := range s.query("id IN (SELECT job FROM question_links WHERE kind='message' AND owner=? AND token=?)", owner, messageID) {
 		if j.Owner != owner {
 			continue
 		}
@@ -147,7 +147,7 @@ func (s *Store) FindQuestionCode(owner, code string) (Job, UserQuestion, int, bo
 	var batch UserQuestion
 	index := 0
 	found := false
-	for _, j := range s.items {
+	for _, j := range s.query("id IN (SELECT job FROM question_links WHERE kind='code' AND owner=? AND token=?)", owner, code) {
 		if j.Owner != owner {
 			continue
 		}
@@ -173,7 +173,7 @@ func (s *Store) RecordQuestionMessage(jobID, batchID, qid, messageID string) err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[jobID]
+	j, ok := s.lookup(jobID)
 	if !ok {
 		return errors.New("unknown_question_task")
 	}
@@ -208,7 +208,7 @@ func (s *Store) AnswerQuestion(owner, jobID, batchID, qid, source, text string, 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[jobID]
+	j, ok := s.lookup(jobID)
 	if !ok || j.Owner != owner {
 		return false, errors.New("unknown_user_question")
 	}

@@ -36,7 +36,7 @@ func taskStatusLabel(j jobs.Job) string {
 func taskStatusText(store *jobs.Store, outputs *files.Store, origin, owner string) string {
 	var b strings.Builder
 	b.WriteString("最近任务：\n")
-	history := store.History()
+	history := store.Recent(owner, 5)
 	count := 0
 	for i := len(history) - 1; i >= 0 && count < 5; i-- {
 		j := history[i]
@@ -45,7 +45,7 @@ func taskStatusText(store *jobs.Store, outputs *files.Store, origin, owner strin
 		}
 		count++
 		label := taskStatusLabel(j)
-		if mediaSuperseded(j, history) && !j.MediaDeferred && hasUnsentOutputs(j) {
+		if store.Superseded(j) && !j.MediaDeferred && hasUnsentOutputs(j) {
 			label = "已完成，旧版附件保留在任务页"
 		}
 		fmt.Fprintf(&b, "%s\n%s · 已过 %.0f 分钟\n", questionIdentity(j), label, time.Since(j.Created).Minutes())
@@ -123,7 +123,7 @@ func taskStatusHandler(store *jobs.Store, outputs *files.Store, origin string) h
 				items = append(items, map[string]any{"name": ref.Name, "bytes": ref.Size, "url": link, "preview": preview, "package": ref.ID == j.MediaPackage.ID})
 			}
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			json.NewEncoder(w).Encode(map[string]any{"pending_questions": pendingQuestionsText(j), "id": j.ID[:8], "question": questionIdentity(j), "state": j.Status, "status": taskStatusLabel(j), "result": j.Result, "progress": j.Progress, "progress_sequence": j.ProgressSequence, "progress_updated": j.ProgressUpdated, "error": j.Error, "model": j.Model, "effort": j.Effort, "files": items, "delivery_parts": len(j.DeliveryParts), "expected_parts": len(j.Outputs) + 1, "original_files": len(j.Outputs), "package_pending": len(j.Outputs) > 1 && j.MediaPackage.ID == "" && (j.MediaPackageRequired || !j.MediaDeferred), "package_accepted": j.PackageDelivered(), "media_paused": j.MediaDeferred, "older_revision": mediaSuperseded(j, store.History())})
+			json.NewEncoder(w).Encode(map[string]any{"pending_questions": pendingQuestionsText(j), "id": j.ID[:8], "question": questionIdentity(j), "state": j.Status, "status": taskStatusLabel(j), "result": j.Result, "progress": j.Progress, "progress_sequence": j.ProgressSequence, "progress_updated": j.ProgressUpdated, "error": j.Error, "model": j.Model, "effort": j.Effort, "files": items, "delivery_parts": len(j.DeliveryParts), "expected_parts": len(j.Outputs) + 1, "original_files": len(j.Outputs), "package_pending": len(j.Outputs) > 1 && j.MediaPackage.ID == "" && (j.MediaPackageRequired || !j.MediaDeferred), "package_accepted": j.PackageDelivered(), "media_paused": j.MediaDeferred, "older_revision": store.Superseded(j)})
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 )
 
 func TestMaintenanceDrainsWithoutRemovingQueuedJobOrWeakeningAuth(t *testing.T) {
+	defer metadb.CloseAll()
 	root := t.TempDir()
 	s, _ := Open(filepath.Join(root, "jobs"))
 	s.Enqueue("request", "work", "owner", "context")

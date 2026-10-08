@@ -5,6 +5,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"os"
@@ -15,6 +16,7 @@ import (
 )
 
 func TestReplayKeepsInputFilesConversationAndOrdering(t *testing.T) {
+	defer metadb.CloseAll()
 	root := t.TempDir()
 	cfg := config{StatePath: filepath.Join(root, "weixin.json"), JobsDir: filepath.Join(root, "jobs"), FilesDir: filepath.Join(root, "files"), ModelsFile: filepath.Join(root, "models.json"), ConversationsFile: filepath.Join(root, "conversations.json")}
 	account := weixin.NewState(weixin.Account{BotToken: "fixture-token", BotID: "fixture-bot", OwnerID: "owner", BaseURL: weixin.DefaultAPI})

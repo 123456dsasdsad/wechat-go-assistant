@@ -23,7 +23,7 @@ try {
         $taskPlatform = "$($taskTarget.OS)-$($taskTarget.Arch)"
         $taskPlatformDir = Join-Path $taskOutput $taskPlatform
         New-Item -ItemType Directory -Path $taskPlatformDir -Force | Out-Null
-        foreach ($taskCommand in @('weixin', 'relay', 'worker', 'maintenance', 'retry')) {
+        foreach ($taskCommand in @('weixin', 'relay', 'worker', 'maintenance', 'retry', 'storageprobe')) {
             $taskSuffix = if ($taskTarget.OS -eq 'windows') { '.exe' } else { '' }
             $taskBinary = Join-Path $taskPlatformDir ($taskCommand + $taskSuffix)
             & go build -mod=vendor -trimpath -buildvcs=false -ldflags '-s -w' -o $taskBinary "./cmd/$taskCommand"
@@ -39,10 +39,17 @@ try {
         }
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'licenses/tencent-MIT.txt') -Destination $taskPlatformDir
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'vendor/github.com/skip2/go-qrcode/LICENSE') -Destination (Join-Path $taskPlatformDir 'go-qrcode-MIT.txt')
+        $taskVendorRoot = Join-Path $PSScriptRoot 'vendor'
+        foreach ($taskLicense in Get-ChildItem -LiteralPath $taskVendorRoot -Recurse -File | Where-Object { $_.Name -match '^(LICENSE|LICENCE|COPYING|NOTICE|SQLITE-LICENSE)' }) {
+            $taskRelativeLicense = $taskLicense.FullName.Substring($taskVendorRoot.Length).TrimStart('\','/')
+            $taskLicenseTarget = Join-Path (Join-Path $taskPlatformDir 'licenses/vendor') $taskRelativeLicense
+            New-Item -ItemType Directory -Force -Path (Split-Path $taskLicenseTarget -Parent) | Out-Null
+            Copy-Item -LiteralPath $taskLicense.FullName -Destination $taskLicenseTarget
+        }
         Compress-Archive -Path (Join-Path $taskPlatformDir '*') -DestinationPath (Join-Path $taskOutput "wechat-go-assistant-$taskPlatform.zip") -Force
     }
     [IO.File]::WriteAllText((Join-Path $taskOutput 'manifest.json'), (ConvertTo-Json -InputObject $taskManifest -Depth 4), [Text.UTF8Encoding]::new($false))
-    Write-Output "Built 15 binaries and 3 platform archives in $taskOutput"
+    Write-Output "Built 18 binaries and 3 platform archives in $taskOutput"
 } finally {
     $env:GOOS = $taskPreviousGOOS
     $env:GOARCH = $taskPreviousGOARCH

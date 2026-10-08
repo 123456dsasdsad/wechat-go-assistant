@@ -2,12 +2,14 @@ package main
 
 import (
 	"errors"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"strings"
 	"testing"
 )
 
 func TestDeliveryDiagnosticsRetainCodeAndHideUntrustedErrorText(t *testing.T) {
+	defer metadb.CloseAll()
 	api := deliveryRetryLog("job", &weixin.APIError{Operation: "sendMessage", Ret: -1, Code: 123})
 	if !strings.Contains(api, `"code":123`) || !strings.Contains(api, `"operation":"sendMessage"`) {
 		t.Fatal("API error code omitted")

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/quotes"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"image"
@@ -26,6 +27,7 @@ func quoteFixture(t *testing.T) *inbound {
 	return in
 }
 func TestQuotedCommandsAreMaterialNotControls(t *testing.T) {
+	defer metadb.CloseAll()
 	for _, input := range []string{"1", "上传账号", "请概述"} {
 		in := quoteFixture(t)
 		m := textMessage("quoted", input)
@@ -40,6 +42,7 @@ func TestQuotedCommandsAreMaterialNotControls(t *testing.T) {
 	}
 }
 func TestIncomingIDQuoteSurvivesRestartAndPartialSelection(t *testing.T) {
+	defer metadb.CloseAll()
 	in := quoteFixture(t)
 	m := textMessage("original", "首段，引用这段，尾段")
 	in.handle(context.Background(), m)
@@ -67,6 +70,7 @@ func TestIncomingIDQuoteSurvivesRestartAndPartialSelection(t *testing.T) {
 	t.Fatal("follow-up not queued")
 }
 func TestMissingReferenceDoesNotRunIncompleteTask(t *testing.T) {
+	defer metadb.CloseAll()
 	in := quoteFixture(t)
 	m := textMessage("missing", "分析引用内容")
 	m.Items[0].Ref = &weixin.RefMessage{ServerID: "unseen"}
@@ -76,6 +80,7 @@ func TestMissingReferenceDoesNotRunIncompleteTask(t *testing.T) {
 	}
 }
 func TestQuotedOutputIsCopiedAndVerifiedAsInput(t *testing.T) {
+	defer metadb.CloseAll()
 	in := quoteFixture(t)
 	in.outputs, _ = files.Open(filepath.Join(t.TempDir(), "outputs"))
 	ref, e := in.outputs.Save("owner", "output", "实验数据.txt", strings.NewReader("真实数据"))
@@ -103,6 +108,7 @@ func TestQuotedOutputIsCopiedAndVerifiedAsInput(t *testing.T) {
 	}
 }
 func TestLargeInlineQuoteSavedAsFile(t *testing.T) {
+	defer metadb.CloseAll()
 	in := quoteFixture(t)
 	m := textMessage("largequote", "总结这份聊天")
 	m.Items[0].Ref = &weixin.RefMessage{Item: &weixin.Item{Type: 1, Text: &weixin.TextItem{Text: strings.Repeat("资料", 3000)}}}
@@ -115,6 +121,7 @@ func TestLargeInlineQuoteSavedAsFile(t *testing.T) {
 	}
 }
 func TestForwardIntakeCommandDoesNotInvokeAI(t *testing.T) {
+	defer metadb.CloseAll()
 	in := quoteFixture(t)
 	if e := in.handle(context.Background(), textMessage("paste", "转发内容")); e != nil {
 		t.Fatal(e)
@@ -125,6 +132,7 @@ func TestForwardIntakeCommandDoesNotInvokeAI(t *testing.T) {
 }
 
 func TestMultipleInlineImageQuotesKeepDistinctAttachments(t *testing.T) {
+	defer metadb.CloseAll()
 	in := quoteFixture(t)
 	var picture bytes.Buffer
 	png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 2, 2)))
@@ -141,6 +149,7 @@ func TestMultipleInlineImageQuotesKeepDistinctAttachments(t *testing.T) {
 	}
 }
 func TestLongQuoteWithFourDirectFilesRepliesInsteadOfRetryingForever(t *testing.T) {
+	defer metadb.CloseAll()
 	in := quoteFixture(t)
 	m := textMessage("five", "分析这些资料")
 	m.Items[0].Ref = &weixin.RefMessage{Item: &weixin.Item{Type: weixin.TextType, Text: &weixin.TextItem{Text: strings.Repeat("长原文", 3000)}}}

@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -38,7 +38,7 @@ func Open(path string, catalog models.Catalog) (*Store, error) {
 		return nil, errors.New("initial_model_missing")
 	}
 	s := &Store{path: path, catalog: catalog, state: state{Version: 1, Choice: initial}}
-	b, err := os.ReadFile(path)
+	b, err := metadb.ReadJSON(path)
 	if err == nil {
 		if len(b) > 1024*1024 || json.Unmarshal(b, &s.state) != nil || s.state.Version != 1 {
 			return nil, errors.New("invalid_settings")
@@ -55,29 +55,7 @@ func Open(path string, catalog models.Catalog) (*Store, error) {
 	return s, nil
 }
 func (s *Store) save(next state) error {
-	b, err := json.Marshal(next)
-	if err != nil {
-		return err
-	}
-	if err = os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(s.path), ".settings-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err = f.Write(b); err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if err = os.Rename(f.Name(), s.path); err != nil {
+	if err := metadb.WriteJSON(s.path, next); err != nil {
 		return err
 	}
 	s.state = next
@@ -117,7 +95,7 @@ func (s *Store) Handle(source, input string) (bool, string, error) {
 	case "模型列表":
 		reply = s.list()
 	case "当前模型", "当前设置":
-		reply = fmt.Sprintf("当前默认模型：%s\n推理强度：%s\n校园 Codex CLI；任务目录只读。新任务使用此设置，已有任务保持原选择。", next.Choice.Model, next.Choice.Effort)
+		reply = fmt.Sprintf("当前默认模型：%s\n推理强度：%s\n校园 Codex CLI；按授权执行任务。新任务使用此设置，已有任务保持原选择。", next.Choice.Model, next.Choice.Effort)
 	case "模型帮助", "帮助":
 		reply = "模型列表\n当前设置\n默认模型 <编号或型号>\n推理强度 <等级>\n使用 <型号>：任务内容\n切换默认设置只影响后续任务。"
 	default:

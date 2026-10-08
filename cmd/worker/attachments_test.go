@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 )
 
 func TestPrivateAttachmentIntegrity(t *testing.T) {
+	defer metadb.CloseAll()
 	content := "actual campus input"
 	sum := sha256.Sum256([]byte(content))
 	ref := files.Ref{ID: strings.Repeat("a", 24), Name: "note.txt", Size: int64(len(content)), SHA256: hex.EncodeToString(sum[:])}

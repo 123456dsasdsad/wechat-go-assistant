@@ -84,6 +84,8 @@ Linux Worker 服务见 [systemd 模板](../examples/systemd/campus-wechat-worker
 
 ## 7. 验收
 
+SQLite 迁移与回退步骤见 [存储升级](storage-upgrade.md)。迁移后 JSON 文件只作旧备份，监控和升级工具必须通过私有 API 查询当前状态。
+
 依次验证两端私有 health、微信简单任务、同一会话回忆、模型切换、文件 SHA-256、运行中过程文字和显式补发。日志与任务页属于私有运行数据，不要上传到公开 Issue。测试通过仅证明本地协议和调度逻辑，不能替代手机实际收取和账号网关验证。
 
 ## 等待用户回答

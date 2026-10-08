@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/accountupload"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/assistant"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
@@ -18,6 +19,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type messageClient interface {
@@ -36,6 +38,7 @@ type inbound struct {
 	accounts         *accountupload.Store
 	quotes           *quotes.Store
 	botID            string
+	assistant        *assistant.Store
 }
 
 var statusQuestion = regexp.MustCompile(`^(?:现在)?(?:任务|训练|长期训练|跑完长期训练)(?:进度|的结果在哪|完成了吗|跑完了吗|进行到哪了|怎么样了)$`)
@@ -89,6 +92,15 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		return in.reply(ctx, msg, "quote", "本条消息与引用资料合计最多 4 个文件，请分次发送。")
 	}
 	if len(media) == 0 && !quoted {
+		if in.assistant != nil {
+			handled, reply, e := in.assistant.Handle(msg.FromUserID, msg.Key(), input, in.sessions.Current().ID, in.preferences.Current(), time.Now())
+			if e != nil {
+				return e
+			}
+			if handled {
+				return in.reply(ctx, msg, "assistant", reply)
+			}
+		}
 		accountCommand := accountUploadCommand(input)
 		if accountCommand == "upload" {
 			if in.accounts == nil || in.publicURL == "" {
@@ -302,7 +314,11 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		}
 	}
 	session := in.sessions.Current()
-	job, err := in.queue.EnqueueConversation(msg.Key(), body, msg.FromUserID, msg.ContextToken, choice, refs, session.ID)
+	memory := ""
+	if in.assistant != nil {
+		memory = in.assistant.MemoryText(msg.FromUserID)
+	}
+	job, err := in.queue.EnqueuePersonalized(msg.Key(), body, msg.FromUserID, msg.ContextToken, choice, refs, session.ID, memory)
 	if err != nil {
 		return err
 	}
@@ -310,12 +326,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		return err
 	}
 	fmt.Printf("{\"type\":\"job_queued\",\"id\":%q,\"model\":%q,\"effort\":%q,\"files\":%d}\n", job.ID, job.Model, job.Effort, len(job.Attachments))
-	before := 0
-	for _, other := range in.queue.History() {
-		if other.ID != job.ID && other.Owner == job.Owner && (other.Status == "running" || other.Status == "queued") && other.Created.Before(job.Created) {
-			before++
-		}
-	}
+	before := in.queue.Before(job)
 	text := questionIdentity(job) + fmt.Sprintf("\n已收到，任务已排队，前面有 %d 个任务。模型 %s，推理 %s。", before, job.Model, job.Effort)
 	if _, ok := supplementText(input); ok && len(refs) > 0 {
 		text += "\n带文件的补充作为下一轮任务执行。"

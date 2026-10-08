@@ -33,7 +33,7 @@ func quoteRecorder(cache *quotes.Store, bot string, queue *jobs.Store) func(weix
 			if len(parts) == 2 {
 				index, e := strconv.Atoi(parts[1])
 				if e == nil {
-					for _, j := range queue.History() {
+					for _, j := range queue.Active() {
 						if j.Owner != reply.ToUserID {
 							continue
 						}

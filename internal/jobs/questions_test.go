@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ func testQuestionRequest() userinput.Request {
 	return userinput.Request{ID: "call-1", Questions: []userinput.Question{{ID: "format", Question: "选择格式", Options: []userinput.Option{{Label: "PNG"}, {Label: "SVG"}}}, {ID: "title", Question: "填写标题"}}}
 }
 func TestQuestionPersistenceOwnershipAndNoPrematureCompletion(t *testing.T) {
+	defer metadb.CloseAll()
 	dir := t.TempDir()
 	s, _ := Open(dir)
 	j, _ := s.Enqueue("source", "work", "owner", "context")
@@ -66,6 +68,7 @@ func TestQuestionPersistenceOwnershipAndNoPrematureCompletion(t *testing.T) {
 	}
 }
 func TestExpiredAttemptCannotConsumeOldQuotedAnswer(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(t.TempDir())
 	j, _ := s.Enqueue("s", "work", "owner", "ctx")
 	now := time.Now()
@@ -88,6 +91,7 @@ func TestExpiredAttemptCannotConsumeOldQuotedAnswer(t *testing.T) {
 	}
 }
 func TestHTTPQuestionWaitBlocksUntilEveryAnswer(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(t.TempDir())
 	j, _ := s.Enqueue("s", "work", "owner", "ctx")
 	task, _ := s.Claim(time.Now())

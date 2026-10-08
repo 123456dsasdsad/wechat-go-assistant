@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"image"
 	"image/png"
@@ -40,6 +41,7 @@ func (f *fakeResultSender) SendFile(context.Context, weixin.Reply, string, weixi
 	return weixin.SendResult{}, nil
 }
 func TestPartialDeliveryRetryKeepsCommittedParts(t *testing.T) {
+	defer metadb.CloseAll()
 	queue, _ := jobs.Open(t.TempDir())
 	queue.Enqueue("source", "request", "owner", "reply")
 	task, _ := queue.Claim(time.Now())

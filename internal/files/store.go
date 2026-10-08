@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"hash"
 	"io"
 	"math"
@@ -136,7 +137,7 @@ func OpenWithLimit(root string, limit int) (*Store, error) {
 		return nil, errors.New("upload_grant_key_unreadable")
 	}
 	s.key = key
-	b, err := os.ReadFile(filepath.Join(root, "index.json"))
+	b, err := metadb.ReadJSON(filepath.Join(root, "index.json"))
 	if err == nil {
 		if len(b) > 4<<20 || json.Unmarshal(b, &s.state) != nil || s.state.Version != 1 || s.state.Files == nil || s.state.Grants == nil {
 			return nil, errors.New("invalid_files_index")
@@ -157,30 +158,13 @@ func OpenWithLimit(root string, limit int) (*Store, error) {
 			return nil, errors.New("invalid_saved_upload_grant")
 		}
 	}
+	if err = metadb.WriteJSON(filepath.Join(root, "index.json"), s.state); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 func (s *Store) save(next state) error {
-	b, err := json.Marshal(next)
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(s.root, ".files-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	_, err = f.Write(b)
-	if err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if err = os.Rename(f.Name(), filepath.Join(s.root, "index.json")); err != nil {
+	if err := metadb.WriteJSON(filepath.Join(s.root, "index.json"), next); err != nil {
 		return err
 	}
 	s.state = next

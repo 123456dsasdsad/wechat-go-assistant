@@ -3,15 +3,15 @@ package jobs
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +19,7 @@ import (
 )
 
 type Job struct {
+	Memory               string         `json:"memory,omitempty"`
 	Questions            []UserQuestion `json:"questions,omitempty"`
 	ID                   string         `json:"id"`
 	Input                string         `json:"input"`
@@ -53,6 +54,7 @@ type Job struct {
 }
 
 type Task struct {
+	Memory         string      `json:"memory,omitempty"`
 	ID             string      `json:"id"`
 	Input          string      `json:"input"`
 	Model          string      `json:"model"`
@@ -71,51 +73,24 @@ type Completion struct {
 	SteerReceipts []SteerReceipt `json:"steer_receipts,omitempty"`
 }
 type Store struct {
-	mu    sync.Mutex
-	dir   string
-	items map[string]Job
+	mu      sync.Mutex
+	dir     string
+	db      *sql.DB
+	readErr error
 }
 
 func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	s := &Store{dir: dir, items: map[string]Job{}}
-	entries, err := os.ReadDir(dir)
+	db, err := metadb.Open(filepath.Join(dir, "tasks.sqlite"))
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			return nil, err
-		}
-		var j Job
-		if err = json.Unmarshal(b, &j); err != nil {
-			return nil, errors.New("invalid saved job")
-		}
-		if j.Effort == "" {
-			j.Effort = "high"
-		}
-		if !validSavedQuestions(j) {
-			return nil, errors.New("invalid_saved_questions")
-		}
-		if len(j.Progress) > 256<<10 {
-			return nil, errors.New("invalid_saved_progress")
-		}
-		if !validID(j.ID) || e.Name() != j.ID+".json" || !models.ValidID(j.Model) || !models.ValidEffort(j.Effort) {
-			return nil, errors.New("unsupported saved job")
-		}
-		if !validAttachments(j.Attachments) || !files.ValidResults(j.Outputs) {
-			return nil, errors.New("invalid_saved_attachments")
-		}
-		if j.ConversationID != "" && !conversations.ValidID(j.ConversationID) {
-			return nil, errors.New("invalid_saved_conversation")
-		}
-		s.items[j.ID] = j
+	metadb.KeepOpen(db)
+	s := &Store{dir: dir, db: db}
+	if err = s.initialize(); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
@@ -127,32 +102,10 @@ func validID(id string) bool {
 	return err == nil
 }
 func (s *Store) save(j Job) error {
-	b, err := json.Marshal(j)
-	if err != nil {
-		return err
+	if s.readErr != nil {
+		return s.readErr
 	}
-	f, err := os.CreateTemp(s.dir, ".job-*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	defer os.Remove(tmp)
-	if _, err = f.Write(b); err != nil {
-		f.Close()
-		return err
-	}
-	if err = f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	if err = os.Rename(tmp, filepath.Join(s.dir, j.ID+".json")); err != nil {
-		return err
-	}
-	s.items[j.ID] = copyQuestions(j)
-	return nil
+	return s.put(s.db, j)
 }
 func (s *Store) Enqueue(source, input, owner, replyContext string) (Job, error) {
 	return s.EnqueueSelected(source, input, owner, replyContext, models.Choice{Model: "gpt-6-sol", Effort: "high"})
@@ -187,7 +140,7 @@ func (s *Store) enqueue(source, input, owner, replyContext string, choice models
 	}
 	h := sha256.Sum256([]byte(source))
 	id := hex.EncodeToString(h[:12])
-	if j, ok := s.items[id]; ok {
+	if j, ok := s.lookup(id); ok {
 		return j, nil
 	}
 	j := Job{ID: id, Input: input, Owner: owner, ReplyContext: replyContext, Model: choice.Model, Effort: choice.Effort, Status: "queued", Created: time.Now().UTC()}
@@ -195,26 +148,17 @@ func (s *Store) enqueue(source, input, owner, replyContext string, choice models
 	j.ConversationID = conversationID
 	return j, s.save(j)
 }
-func (s *Store) ordered() []Job {
-	out := make([]Job, 0, len(s.items))
-	for _, j := range s.items {
-		out = append(out, j)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Created.Equal(out[j].Created) {
-			return out[i].ID < out[j].ID
-		}
-		return out[i].Created.Before(out[j].Created)
-	})
-	return out
-}
+func (s *Store) ordered() []Job { return s.query("1=1") }
 func (s *Store) Claim(now time.Time) (*Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.maintenanceDrained(now) {
 		return nil, nil
 	}
-	ordered := s.ordered()
+	ordered := s.query("status IN ('queued','running')")
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
 	active := map[string]bool{}
 	for _, j := range ordered {
 		if j.Status == "running" && now.Before(j.LeaseUntil) {
@@ -257,7 +201,7 @@ func (s *Store) Claim(now time.Time) (*Task, error) {
 		if err := s.save(j); err != nil {
 			return nil, err
 		}
-		return &Task{ID: j.ID, Input: j.Input, Model: j.Model, Effort: j.Effort, Lease: j.Lease, Attachments: append([]files.Ref(nil), j.Attachments...), ConversationID: j.ConversationID}, nil
+		return &Task{Memory: j.Memory, ID: j.ID, Input: j.Input, Model: j.Model, Effort: j.Effort, Lease: j.Lease, Attachments: append([]files.Ref(nil), j.Attachments...), ConversationID: j.ConversationID}, nil
 	}
 	return nil, nil
 }
@@ -278,10 +222,13 @@ func (s *Store) BeginMaintenance(until time.Time) error {
 	if s.maintenanceDrained(time.Now()) {
 		return errors.New("maintenance_busy")
 	}
-	for _, j := range s.items {
+	for _, j := range s.query("status='running'") {
 		if j.Status == "running" {
 			return errors.New("ai_task_running")
 		}
+	}
+	if s.readErr != nil {
+		return s.readErr
 	}
 	return os.WriteFile(filepath.Join(filepath.Dir(s.dir), "maintenance-drain.flag"), []byte(strconv.FormatInt(until.Unix(), 10)), 0600)
 }
@@ -289,7 +236,7 @@ func (s *Store) BeginMaintenance(until time.Time) error {
 func (s *Store) Attachment(jobID, lease, fileID string, now time.Time) (files.Ref, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[jobID]
+	j, ok := s.lookup(jobID)
 	if !ok || j.Status != "running" || lease == "" || j.Lease != lease || !now.Before(j.LeaseUntil) {
 		return files.Ref{}, errors.New("invalid_attachment_lease")
 	}
@@ -303,7 +250,7 @@ func (s *Store) Attachment(jobID, lease, fileID string, now time.Time) (files.Re
 func (s *Store) Complete(c Completion, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[c.ID]
+	j, ok := s.lookup(c.ID)
 	if !ok || j.Lease != c.Lease || c.Lease == "" {
 		return errors.New("unknown or stale task lease")
 	}
@@ -338,7 +285,7 @@ func (s *Store) Complete(c Completion, now time.Time) error {
 func (s *Store) Heartbeat(id, lease string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[id]
+	j, ok := s.lookup(id)
 	if !ok || lease == "" || j.Lease != lease || j.Status != "running" || !now.Before(j.LeaseUntil) {
 		return errors.New("invalid_task_lease")
 	}
@@ -354,7 +301,7 @@ func (s *Store) Ready() []Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []Job{}
-	for _, j := range s.ordered() {
+	for _, j := range s.query("status='done'") {
 		if j.Status == "done" {
 			out = append(out, j)
 		}
@@ -378,7 +325,7 @@ func (s *Store) History() []Job {
 func (s *Store) Snapshot(id string) (Job, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[id]
+	j, ok := s.lookup(id)
 	j.Attachments = append([]files.Ref(nil), j.Attachments...)
 	j.Outputs = append([]files.Ref(nil), j.Outputs...)
 	j.DeliveryParts = append([]string(nil), j.DeliveryParts...)
@@ -388,7 +335,7 @@ func (s *Store) Snapshot(id string) (Job, bool) {
 func (s *Store) Delivered(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.items[id]
+	j, ok := s.lookup(id)
 	if !ok || j.Status != "done" {
 		return errors.New("task is not ready")
 	}

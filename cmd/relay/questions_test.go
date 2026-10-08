@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ func pendingQuestionFixture(t *testing.T) (*inbound, jobs.Job, jobs.UserQuestion
 	return in, j, b
 }
 func TestQuotedOptionAnswersOriginalTaskAfterConversationSwitch(t *testing.T) {
+	defer metadb.CloseAll()
 	in, j, b := pendingQuestionFixture(t)
 	in.handle(context.Background(), textMessage("switch", "新建会话 另一个任务"))
 	m := textMessage("answer", "2")
@@ -43,6 +45,7 @@ func TestQuotedOptionAnswersOriginalTaskAfterConversationSwitch(t *testing.T) {
 	}
 }
 func TestOrdinaryMessageStillQueuesWhileQuestionWaits(t *testing.T) {
+	defer metadb.CloseAll()
 	in, j, _ := pendingQuestionFixture(t)
 	in.handle(context.Background(), textMessage("ordinary", "这是新任务，检查文件"))
 	saved, _ := in.queue.Snapshot(j.ID)
@@ -51,6 +54,7 @@ func TestOrdinaryMessageStillQueuesWhileQuestionWaits(t *testing.T) {
 	}
 }
 func TestQuotedFreeTextAndOldQuestionsNeverBecomeNewTasks(t *testing.T) {
+	defer metadb.CloseAll()
 	in, j, b := pendingQuestionFixture(t)
 	m := textMessage("free", "我需要 PDF 格式")
 	m.Items[0].Ref = &weixin.RefMessage{ServerID: "sent-question"}
@@ -76,6 +80,7 @@ func (*rejectedQuestionClient) SendText(context.Context, weixin.Reply, string) (
 	return weixin.SendResult{}, errors.New("rejected")
 }
 func TestDeliveryFailureNeverResolvesUserQuestion(t *testing.T) {
+	defer metadb.CloseAll()
 	in, j, b := pendingQuestionFixture(t)
 	if e := deliverUserQuestion(context.Background(), &rejectedQuestionClient{}, in.queue, j, b, 0); e == nil {
 		t.Fatal("failed send accepted")
@@ -87,6 +92,7 @@ func TestDeliveryFailureNeverResolvesUserQuestion(t *testing.T) {
 }
 
 func TestAcceptedQuestionIDBindsBeforeSendReturnsEvenWithoutQuoteCache(t *testing.T) {
+	defer metadb.CloseAll()
 	in, j, b := pendingQuestionFixture(t)
 	callback := quoteRecorder(nil, "bot", in.queue)
 	callback(weixin.Reply{ToUserID: "owner", ClientID: "go-question-" + b.ID + "-1"}, weixin.SendResult{MessageID: "accepted-question-id"}, userQuestionText(j, b, 0), false)

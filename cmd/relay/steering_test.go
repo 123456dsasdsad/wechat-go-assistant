@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestOnlyExplicitSupplementJoinsActiveTask(t *testing.T) {
+	defer metadb.CloseAll()
 	in := inboundFixture(t)
 	ctx := context.Background()
 	in.handle(ctx, textMessage("first", "run task"))
@@ -24,6 +26,7 @@ func TestOnlyExplicitSupplementJoinsActiveTask(t *testing.T) {
 	}
 }
 func TestNoActiveSupplementQueuesAndEmptySupplementDoesNot(t *testing.T) {
+	defer metadb.CloseAll()
 	in := inboundFixture(t)
 	ctx := context.Background()
 	in.handle(ctx, textMessage("empty", "补充："))

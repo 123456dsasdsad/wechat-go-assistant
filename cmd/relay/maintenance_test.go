@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/maintenance"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"strings"
 	"testing"
 )
 
 func TestMaintenanceCommandsNeverEnqueueAI(t *testing.T) {
+	defer metadb.CloseAll()
 	in := inboundFixture(t)
 	in.reports, _ = maintenance.Open(t.TempDir())
 	in.reports.Put(maintenance.NewReport("cloud", "usage", "2026-10-06", "verified daily tokens"))
@@ -46,6 +48,7 @@ func (s *maintenanceChunkSender) SendText(_ context.Context, _ weixin.Reply, tex
 	return weixin.SendResult{}, nil
 }
 func TestMaintenancePartialSendResumesAndRecordsAPIRejection(t *testing.T) {
+	defer metadb.CloseAll()
 	store, _ := maintenance.Open(t.TempDir())
 	r := maintenance.NewReport("campus", "accounts", "2026-10-08", strings.Repeat("甲", 2000)+"tail")
 	store.Put(r)

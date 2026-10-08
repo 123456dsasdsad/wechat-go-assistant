@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"net/http/httptest"
 	"testing"
 	"time"
 )
 
 func TestProgressReachesRelayBeforeResultAndFlushesLatest(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := jobs.Open(t.TempDir())
 	j, _ := s.Enqueue("source", "task", "owner", "context")
 	task, _ := s.Claim(time.Now())

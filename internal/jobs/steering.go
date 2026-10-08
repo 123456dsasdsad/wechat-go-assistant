@@ -38,13 +38,13 @@ func (s *Store) SupplementMessage(source, input, owner, replyContext, cid string
 	h := sha256.Sum256([]byte("supplement:" + source))
 	id := hex.EncodeToString(h[:12])
 	nextHash := sha256.Sum256([]byte("supplement-next:" + source))
-	if j, ok := s.items[hex.EncodeToString(nextHash[:12])]; ok {
+	if j, ok := s.lookup(hex.EncodeToString(nextHash[:12])); ok {
 		if j.Owner != owner {
 			return Job{}, Supplement{}, false, errors.New("supplement_owner_mismatch")
 		}
 		return j, Supplement{}, false, nil
 	}
-	for _, j := range s.items {
+	for _, j := range s.query("id IN (SELECT job FROM supplement_links WHERE token=?)", id) {
 		for _, v := range j.Supplements {
 			if v.ID == id {
 				if j.Owner != owner {
@@ -54,7 +54,7 @@ func (s *Store) SupplementMessage(source, input, owner, replyContext, cid string
 			}
 		}
 	}
-	for _, j := range s.ordered() {
+	for _, j := range s.query("owner=? AND conversation=? AND status='running'", owner, cid) {
 		if j.Owner != owner || j.ConversationID != cid || j.Status != "running" {
 			continue
 		}
@@ -84,7 +84,7 @@ func (s *Store) PendingSupplements(id, lease string, now time.Time) ([]Supplemen
 	return out, nil
 }
 func (s *Store) steerJob(id, lease string, now time.Time) (Job, error) {
-	j, ok := s.items[id]
+	j, ok := s.lookup(id)
 	if !ok || lease == "" || j.Lease != lease || j.Status != "running" || !now.Before(j.LeaseUntil) {
 		return Job{}, errors.New("invalid_steer_lease")
 	}

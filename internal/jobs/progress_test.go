@@ -1,12 +1,14 @@
 package jobs
 
 import (
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestProgressPersistsWhileRunningAndRejectsStaleUpdates(t *testing.T) {
+	defer metadb.CloseAll()
 	dir := filepath.Join(t.TempDir(), "jobs")
 	s, _ := Open(dir)
 	j, _ := s.Enqueue("source", "task", "owner", "context")

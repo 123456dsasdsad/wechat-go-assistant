@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -11,6 +12,7 @@ import (
 )
 
 func TestTaskPageProtectsJobScopeAndDoesNotExposePrivateFields(t *testing.T) {
+	defer metadb.CloseAll()
 	queue, _ := jobs.Open(t.TempDir())
 	outputs, _ := files.Open(t.TempDir())
 	job, _ := queue.Enqueue("request", "password=private-input", "private-owner", "private-reply-context")
@@ -51,6 +53,7 @@ func TestTaskPageProtectsJobScopeAndDoesNotExposePrivateFields(t *testing.T) {
 }
 
 func TestTaskPageShowsProgressBeforeCompletion(t *testing.T) {
+	defer metadb.CloseAll()
 	queue, _ := jobs.Open(t.TempDir())
 	outputs, _ := files.Open(t.TempDir())
 	j, _ := queue.Enqueue("live", "检查资料", "owner", "context")

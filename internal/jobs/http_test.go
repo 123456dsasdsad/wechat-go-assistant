@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"encoding/json"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 )
 
 func TestPrivateAPIAndCredentialBoundary(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(t.TempDir())
 	s.Enqueue("id", "input", "private-owner", "private-context")
 	h := Handler(s, "test-key")
@@ -38,6 +40,7 @@ func TestPrivateAPIAndCredentialBoundary(t *testing.T) {
 }
 
 func TestHeartbeatAPIRequiresBearerAndCurrentLease(t *testing.T) {
+	defer metadb.CloseAll()
 	s, _ := Open(t.TempDir())
 	s.Enqueue("id", "input", "owner", "reply")
 	task, _ := s.Claim(time.Now())

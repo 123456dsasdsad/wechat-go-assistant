@@ -52,7 +52,7 @@ func (in *inbound) answerUserQuestion(ctx context.Context, msg weixin.Message, i
 	if !found && !quoted && media == 0 {
 		if input == "待回答" || input == "问题列表" {
 			var lines []string
-			for _, j := range in.queue.History() {
+			for _, j := range in.queue.Active() {
 				if j.Owner != msg.FromUserID || j.VerificationOnly || !j.WaitingForUser() {
 					continue
 				}
@@ -119,7 +119,7 @@ func deliverUserQuestion(ctx context.Context, client messageClient, store *jobs.
 func deliverUserQuestions(ctx context.Context, client *liveResultSender, store *jobs.Store) {
 	backoff := map[string]deliveryBackoff{}
 	for pause(ctx, time.Second) {
-		for _, j := range store.History() {
+		for _, j := range store.Active() {
 			if j.VerificationOnly || !j.WaitingForUser() || !time.Now().Before(j.LeaseUntil) {
 				continue
 			}

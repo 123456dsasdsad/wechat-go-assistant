@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/steering"
 	"os"
 	"reflect"
@@ -37,7 +38,7 @@ func OpenThreads(path string) (*Threads, error) {
 		return nil, errors.New("thread_store_path_required")
 	}
 	s := &Threads{path: path, state: threadsState{Version: 1, Threads: map[string]string{}}}
-	b, err := os.ReadFile(path)
+	b, err := metadb.ReadJSON(path)
 	if err == nil {
 		if len(b) > 8<<20 || json.Unmarshal(b, &s.state) != nil || s.state.Version != 1 || s.state.Threads == nil || len(s.state.Turns) > 64 {
 			return nil, errors.New("invalid_thread_store")

@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 )
 
 func TestAttachmentLeaseAndConversationSnapshot(t *testing.T) {
+	defer metadb.CloseAll()
 	f, _ := files.Open(t.TempDir())
 	ref, _ := f.Save("owner", "source", "a.txt", strings.NewReader("protected file"))
 	q, _ := Open(t.TempDir())

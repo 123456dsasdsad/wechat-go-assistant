@@ -74,18 +74,13 @@ func runWithPrefix(path string, ids []string, prefix string) error {
 		return err
 	}
 	previous := sessions.Current()
-	history := store.History()
-	originals := map[string]jobs.Job{}
-	for _, job := range history {
-		if job.Status == "running" || job.Status == "queued" {
-			return errors.New("active_tasks_must_finish")
-		}
-		originals[job.ID] = job
+	if len(store.Active()) != 0 {
+		return errors.New("active_tasks_must_finish")
 	}
 	selected := make([]jobs.Job, 0, len(ids))
 	seen := map[string]bool{}
 	for _, id := range ids {
-		job, ok := originals[id]
+		job, ok := store.Snapshot(id)
 		if !ok || seen[id] || job.Owner != owner || job.Status != "delivered" || job.ConversationID == "" {
 			return errors.New("invalid_replay_job")
 		}

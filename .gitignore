@@ -12,6 +12,8 @@
 *.test
 *.log
 *.sqlite
+*.sqlite-*
+*.json.sqlite-*
 *.sqlite3
 *.db
 *.pem
