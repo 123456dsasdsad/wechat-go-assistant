@@ -1,6 +1,6 @@
 # Native server maintenance
 
-The campus installer uses Python 3.11 or newer (including the standard `tomllib`).
+The campus installer and runner use Python 3.10 or newer with no extra packages.
 
 The scripts and Go command make no model calls. Windows tasks and campus user
 systemd timers run independently of the user's computer, in Beijing time.
@@ -59,6 +59,7 @@ progress for a deferred retry. The daily account runner and its existing retry
 queue use the same check.
 
 Phone commands: `用量日报`, `账号状态`, `失效账号`, `更新状态`, `运维日报`.
+`校园账号检查` and `校园账号状态` return the campus report directly.
 They query deterministic reports and do not create AI jobs. WeChat's reply-context
 restriction can reject proactive notification; reports remain stored and queryable.
 Maintenance never requests or unpauses old task images.

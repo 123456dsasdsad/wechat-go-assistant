@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import json,os,pathlib,subprocess,tomllib
+import json,os,pathlib,subprocess
+from provider_config import selected_provider_url
 
 root=pathlib.Path('/home/worker/campus-stack/maintenance')
 os.umask(0o077);root.mkdir(exist_ok=True)
@@ -16,9 +17,8 @@ if not cfg.exists():
 # an operator's explicitly configured endpoint and credentials.
 value=json.loads(cfg.read_text())
 if 'gateway_url' not in value or 'gateway_key_file' not in value:
-    codex=tomllib.loads((pathlib.Path(worker['codex_home'])/'config.toml').read_text())
-    provider=codex.get('model_providers',{}).get(codex.get('model_provider',''),{})
-    value.setdefault('gateway_url',provider.get('base_url',''))
+    codex=(pathlib.Path(worker['codex_home'])/'config.toml').read_text()
+    value.setdefault('gateway_url',selected_provider_url(codex))
     value.setdefault('gateway_key_file',worker['api_key_file'])
     temp=cfg.with_suffix('.new');temp.write_text(json.dumps(value,indent=2));os.chmod(temp,0o600);os.replace(temp,cfg)
 units=pathlib.Path('/home/worker/.config/systemd/user');units.mkdir(parents=True,exist_ok=True)

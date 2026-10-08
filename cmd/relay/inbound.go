@@ -121,6 +121,11 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 				kind = "usage"
 			case "账号状态", "失效账号":
 				kind = "accounts"
+			case "校园账号检查", "校园账号状态", "校园帐号检查", "校园帐号状态":
+				if report, ok := in.reports.LatestReport("campus", "accounts"); ok {
+					return in.reply(ctx, msg, "maintenance", report.Text)
+				}
+				return in.reply(ctx, msg, "maintenance", "暂时没有校园账号检查报告；每日北京时间 07:00 检查，检查完成后会主动发送明细。")
 			case "更新状态":
 				kind = "updates"
 			case "运维日报":
