@@ -390,8 +390,12 @@ func ValidateMaterial(m Material) error {
 			return errors.New("claim_evidence_missing")
 		}
 		if c.Field == "result" {
-			for _, n := range claimNumbers.FindAllString(c.Text, -1) {
-				if !strings.Contains(c.Excerpt, n) {
+			observed := map[string]bool{}
+			for _, n := range resultNumbers(c.Excerpt) {
+				observed[n] = true
+			}
+			for _, n := range resultNumbers(c.Text) {
+				if !observed[n] {
 					return errors.New("result_number_not_in_evidence")
 				}
 			}
@@ -403,7 +407,23 @@ func ValidateMaterial(m Material) error {
 	return nil
 }
 
-var claimNumbers = regexp.MustCompile(`\d+(?:\.\d+)?`)
+var claimNumbers = regexp.MustCompile(`\d+(?:\.\d+)?(?:[eE][+-]?\d+)?`)
+
+func resultNumbers(text string) []string {
+	out := []string{}
+	latin := func(b byte) bool { return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' }
+	for _, span := range claimNumbers.FindAllStringIndex(text, -1) {
+		if span[0] > 0 && latin(text[span[0]-1]) || span[1] < len(text) && latin(text[span[1]]) {
+			continue
+		}
+		n := text[span[0]:span[1]]
+		if strings.Contains(n, ".") && !strings.ContainsAny(n, "eE") {
+			n = strings.TrimRight(strings.TrimRight(n, "0"), ".")
+		}
+		out = append(out, n)
+	}
+	return out
+}
 
 func uniqueAssets(xs []Asset) []Asset {
 	out := []Asset{}
