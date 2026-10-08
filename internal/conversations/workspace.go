@@ -10,9 +10,10 @@ import (
 )
 
 type Profile struct {
-	Project   string  `json:"project"`
-	Notes     string  `json:"notes"`
-	BudgetUSD float64 `json:"budget_usd"`
+	LibraryTopics []string `json:"library_topics,omitempty"`
+	Project       string   `json:"project"`
+	Notes         string   `json:"notes"`
+	BudgetUSD     float64  `json:"budget_usd"`
 }
 
 func ValidProject(p string) bool {
@@ -42,6 +43,16 @@ func (s *Store) Resolve(value string) (Session, bool) {
 	return findSession(s.state.Sessions, value)
 }
 func (s *Store) UpdateProfile(id string, p Profile) error {
+	if len(p.LibraryTopics) > 16 {
+		return errors.New("invalid_library_scope")
+	}
+	for i, v := range p.LibraryTopics {
+		v = strings.TrimSpace(v)
+		if v == "" || len(v) > 240 || strings.ContainsAny(v, "\x00\r\n") {
+			return errors.New("invalid_library_scope")
+		}
+		p.LibraryTopics[i] = v
+	}
 	if !ValidProject(p.Project) || len(p.Notes) > 8192 || p.BudgetUSD < 0 || p.BudgetUSD > 1e6 || math.IsNaN(p.BudgetUSD) || math.IsInf(p.BudgetUSD, 0) {
 		return errors.New("invalid_profile")
 	}

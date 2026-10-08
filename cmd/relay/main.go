@@ -11,6 +11,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/library"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/maintenance"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
@@ -43,6 +44,8 @@ type config struct {
 	CockpitRoot         string `json:"cockpit_root,omitempty"`
 	AccountsDir         string `json:"accounts_dir,omitempty"`
 	AccountReloadRunner string `json:"account_reload_runner,omitempty"`
+	LibraryURL          string `json:"library_url,omitempty"`
+	LibraryDraftsDir    string `json:"library_drafts_dir,omitempty"`
 }
 
 func main() {
@@ -220,6 +223,21 @@ func run(ctx context.Context) error {
 		return err
 	}
 	in := &inbound{templates: templates, assistant: assistantStore, client: outbound, preferences: preferences, queue: store, files: fileStore, outputs: outputStore, publicURL: cfg.PublicURL, owner: state.Account.OwnerID, sessions: sessions, reports: reports, accounts: accounts, quotes: quoteStore, botID: state.Account.BotID}
+	if cfg.LibraryURL != "" {
+		in.library, err = library.NewClient(cfg.LibraryURL, key)
+		if err != nil {
+			return err
+		}
+		if cfg.LibraryDraftsDir == "" {
+			cfg.LibraryDraftsDir = filepath.Join(filepath.Dir(cfg.JobsDir), "library-drafts")
+		}
+		in.libraryDrafts, err = library.Open(cfg.LibraryDraftsDir)
+		if err != nil {
+			return err
+		}
+		defer in.libraryDrafts.Close()
+		go in.libraryRetry(ctx, cfg.StatePath)
+	}
 	privateJobs := jobs.HandlerWithOutputs(store, key, fileStore, outputStore, func() models.Choice { return preferences.Current() })
 	privateMaintenance := maintenance.Handler(reports, key)
 	leaseHandler := maintenanceLease(store, key, filepath.Dir(cfg.JobsDir))

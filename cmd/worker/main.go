@@ -13,6 +13,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/library"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/userinput"
 	"io"
@@ -42,9 +43,31 @@ type config struct {
 	PythonBinary       string `json:"python_binary,omitempty"`
 	LiveSteering       bool   `json:"live_steering,omitempty"`
 	MaxConcurrentTasks int    `json:"max_concurrent_tasks,omitempty"`
+	LibraryRoot        string `json:"library_root,omitempty"`
+	LibraryListen      string `json:"library_listen,omitempty"`
+	LibraryOwner       string `json:"library_owner,omitempty"`
+	ScholarProxy       string `json:"scholar_proxy,omitempty"`
+	ScholarKeysFile    string `json:"scholar_keys_file,omitempty"`
+	library            *library.Store
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--library-probe" {
+		fs := flag.NewFlagSet("library-probe", flag.ExitOnError)
+		p := fs.String("config", "", "config")
+		q := fs.String("query", "Graph attention networks", "query")
+		fs.Parse(os.Args[2:])
+		b, e := os.ReadFile(*p)
+		var cfg config
+		if e != nil || json.Unmarshal(b, &cfg) != nil {
+			os.Exit(1)
+		}
+		if e = probeLibrary(cfg, *q); e != nil {
+			fmt.Fprintln(os.Stderr, e)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--training-run" {
 		fs := flag.NewFlagSet("training", flag.ExitOnError)
 		path := fs.String("config", "", "config")
@@ -149,6 +172,17 @@ func run(ctx context.Context) error {
 	threads, e := conversations.OpenThreads(cfg.ThreadsFile)
 	if e != nil {
 		return e
+	}
+	if cfg.LibraryRoot != "" {
+		cfg.library, e = library.Open(cfg.LibraryRoot)
+		if e != nil {
+			return e
+		}
+		defer cfg.library.Close()
+		if e = startLibraryServer(ctx, cfg, relayKey); e != nil {
+			return e
+		}
+		go libraryBackups(ctx, cfg)
 	}
 	fmt.Printf("{\"type\":\"worker_ready\",\"models\":%d,\"max_concurrent_tasks\":%d}\n", len(catalog.Models), cfg.MaxConcurrentTasks)
 	go trainingManager(ctx, cfg, relayKey)
@@ -274,6 +308,19 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 		go maintainLease(taskCtx, finish, func() (int, error) {
 			return call("/jobs/heartbeat", map[string]string{"id": task.ID, "lease": task.Lease}, nil)
 		})
+		if task.Kind == "library_intake" || task.Kind == "review_update" {
+			dir := filepath.Join(cfg.WorkRoot, task.ID)
+			if e = os.MkdirAll(dir, 0700); e != nil {
+				return e
+			}
+			completion := runLibraryTask(taskCtx, cfg, task, relayKey, apiKey)
+			outbox, e := queueResult(cfg, task, completion, dir)
+			if e != nil {
+				return e
+			}
+			_ = acceptResult(ctx, cfg, relayKey, outbox)
+			continue
+		}
 		dir := filepath.Join(cfg.WorkRoot, task.ID)
 		conversationDir := dir
 		if task.ConversationID != "" {
@@ -345,6 +392,7 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 		}
 		runCtx, cancel := context.WithTimeout(taskCtx, time.Duration(cfg.TurnTimeoutSeconds)*time.Second)
 		prompt := buildTaskPrompt(task, cfg.Permissions, cfg.PythonBinary, inputs)
+		prompt += libraryContext(cfg, task)
 		nativeThread := threads.Thread(task.ConversationID)
 		var steering codex.Steering
 		if cfg.LiveSteering {

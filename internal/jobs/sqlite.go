@@ -299,6 +299,7 @@ func (s *Store) EnqueuePersonalized(source, input, owner, replyContext string, c
 		j.Memory = memory
 		if len(profiles) > 0 {
 			j.Project = profiles[0].Project
+			j.LibraryTopics = append([]string(nil), profiles[0].LibraryTopics...)
 			j.BudgetUSD = profiles[0].BudgetUSD
 		}
 		j.Initialized = true

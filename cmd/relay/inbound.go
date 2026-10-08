@@ -9,6 +9,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/library"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/maintenance"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/quotes"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/settings"
@@ -40,6 +41,8 @@ type inbound struct {
 	botID            string
 	assistant        *assistant.Store
 	templates        *assistant.Templates
+	library          *library.Client
+	libraryDrafts    *library.Store
 }
 
 var statusQuestion = regexp.MustCompile(`^(?:现在)?(?:任务|训练|长期训练|跑完长期训练)(?:进度|的结果在哪|完成了吗|跑完了吗|进行到哪了|怎么样了)$`)
@@ -91,6 +94,9 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	}
 	if len(refs)+len(media) > 4 {
 		return in.reply(ctx, msg, "quote", "本条消息与引用资料合计最多 4 个文件，请分次发送。")
+	}
+	if handled, e := in.libraryCommand(ctx, msg, input, material, refs, media); handled {
+		return e
 	}
 	if len(media) == 0 && !quoted {
 		if handled, e := in.workspaceCommand(ctx, msg, input); handled {

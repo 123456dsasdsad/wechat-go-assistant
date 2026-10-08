@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	_ "embed"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/library"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"io"
@@ -41,6 +43,7 @@ type workspaceRequest struct {
 	Size         int64                 `json:"size"`
 	Batch        string                `json:"batch"`
 	Question     string                `json:"question"`
+	Library      *library.Request      `json:"library,omitempty"`
 }
 
 func randomSource() string {
@@ -133,6 +136,43 @@ func (in *inbound) workspaceHandler(statePath string) http.Handler {
 			return
 		}
 		if r.URL.Path != "/wechat-files/manage/api" {
+			if r.Method == "GET" && r.URL.Path == "/wechat-files/manage/library-blob" {
+				if in.library == nil {
+					http.NotFound(w, r)
+					return
+				}
+				id, e := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+				if e != nil {
+					http.NotFound(w, r)
+					return
+				}
+				var m library.Material
+				if e = in.library.Call(r.Context(), library.Request{Owner: owner, Action: "get", MaterialID: id}, &m); e != nil {
+					http.NotFound(w, r)
+					return
+				}
+				sha := r.URL.Query().Get("sha")
+				name := ""
+				for _, a := range m.Assets {
+					if a.SHA256 == sha {
+						name = a.Name
+					}
+				}
+				if name == "" {
+					http.NotFound(w, r)
+					return
+				}
+				src, e := in.library.Download(r.Context(), owner, sha)
+				if e != nil {
+					http.NotFound(w, r)
+					return
+				}
+				defer src.Close()
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(name))
+				io.Copy(w, src)
+				return
+			}
 			http.NotFound(w, r)
 			return
 		}
@@ -223,6 +263,74 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 		reply = s.Contexts[owner]
 	}
 	switch b.Action {
+	case "library":
+		if b.Library == nil || in.library == nil {
+			return nil, errors.New("library_unavailable")
+		}
+		q := *b.Library
+		q.Owner = owner
+		allowed := map[string]bool{"search": true, "topics": true, "get": true, "review": true, "snapshot": true, "move": true, "tags": true, "trash": true, "restore": true, "notes": true, "lock": true, "import": true, "restore_review": true}
+		if !allowed[q.Action] {
+			return nil, errors.New("unsupported_library_action")
+		}
+		var result any
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if e := in.library.Call(ctx, q, &result); e != nil {
+			return nil, e
+		}
+		if q.Action == "move" || q.Action == "trash" || q.Action == "restore" || q.Action == "notes" || q.Action == "tags" || q.Action == "lock" || q.Action == "import" {
+			if _, e := in.queueLibrary(owner, reply, "portal:"+b.Source, "review_update", "*", "资料修改后更新所有受影响综述"); e != nil {
+				return nil, e
+			}
+		}
+		return result, nil
+	case "library_research":
+		if in.libraryDrafts == nil {
+			return nil, errors.New("library_unavailable")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cid := b.Conversation
+		if cid == "" {
+			cid = in.sessions.Current().ID
+		}
+		draft, e := in.libraryDrafts.Begin(owner, "portal:"+b.Source, cid, b.Name)
+		if e != nil {
+			return nil, e
+		}
+		var assets []library.Asset
+		for _, id := range b.Files {
+			ref, e := in.files.Get(owner, id)
+			if e != nil {
+				return nil, e
+			}
+			f, e := in.files.OpenBlob(ref)
+			if e != nil {
+				return nil, e
+			}
+			a := library.Asset{SHA256: ref.SHA256, Size: ref.Size, Name: ref.Name}
+			e = in.libraryDrafts.PutBlob(a, f)
+			f.Close()
+			if e != nil {
+				return nil, e
+			}
+			assets = append(assets, a)
+		}
+		if e = in.libraryDrafts.Append(owner, draft.ID, b.Source, b.Input, assets); e != nil {
+			return nil, e
+		}
+		if e = in.libraryDrafts.State(owner, draft.ID, "syncing"); e != nil {
+			return nil, e
+		}
+		j, e := in.syncLibrary(ctx, draft, reply)
+		if e != nil {
+			return map[string]any{"ok": true, "pending": true, "intake": draft.ID}, nil
+		}
+		return map[string]any{"ok": true, "id": j.ID}, nil
+	case "library_update":
+		j, e := in.queueLibrary(owner, reply, "portal:"+b.Source, "review_update", b.Name, "更新类别综述")
+		return map[string]any{"id": j.ID, "ok": e == nil}, e
 	case "task":
 		refs := []files.Ref{}
 		if len(b.Files) > 4 {

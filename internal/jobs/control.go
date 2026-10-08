@@ -76,6 +76,9 @@ func (s *Store) Retry(owner, id, source, reply string) (Job, error) {
 	}
 	if j.ParentID == "" && j.Status == "queued" {
 		j.ParentID = parent.ID
+		j.Kind = parent.Kind
+		j.LibraryID = parent.LibraryID
+		j.LibraryTopics = append([]string(nil), parent.LibraryTopics...)
 		j.Memory = parent.Memory
 		j.Project = parent.Project
 		j.BudgetUSD = parent.BudgetUSD

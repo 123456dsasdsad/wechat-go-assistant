@@ -21,6 +21,9 @@ import (
 )
 
 type Job struct {
+	Kind                 string         `json:"kind,omitempty"`
+	LibraryID            string         `json:"library_id,omitempty"`
+	LibraryTopics        []string       `json:"library_topics,omitempty"`
 	TrainingResult       string         `json:"training_result,omitempty"`
 	ExpectedOutputs      []OutputIntent `json:"expected_outputs,omitempty"`
 	OutputPending        bool           `json:"output_pending,omitempty"`
@@ -67,6 +70,10 @@ type Job struct {
 }
 
 type Task struct {
+	Kind           string      `json:"kind,omitempty"`
+	LibraryID      string      `json:"library_id,omitempty"`
+	LibraryTopics  []string    `json:"library_topics,omitempty"`
+	Owner          string      `json:"owner,omitempty"`
 	Project        string      `json:"project,omitempty"`
 	BudgetUSD      float64     `json:"budget_usd,omitempty"`
 	Memory         string      `json:"memory,omitempty"`
@@ -229,7 +236,11 @@ func (s *Store) Claim(now time.Time) (*Task, error) {
 		if err := s.save(j); err != nil {
 			return nil, err
 		}
-		return &Task{Project: j.Project, BudgetUSD: j.BudgetUSD, Memory: j.Memory, ID: j.ID, Input: j.Input, Model: j.Model, Effort: j.Effort, Lease: j.Lease, Attachments: append([]files.Ref(nil), j.Attachments...), ConversationID: j.ConversationID}, nil
+		t := &Task{Kind: j.Kind, LibraryID: j.LibraryID, LibraryTopics: append([]string(nil), j.LibraryTopics...), Project: j.Project, BudgetUSD: j.BudgetUSD, Memory: j.Memory, ID: j.ID, Input: j.Input, Model: j.Model, Effort: j.Effort, Lease: j.Lease, Attachments: append([]files.Ref(nil), j.Attachments...), ConversationID: j.ConversationID}
+		if j.Kind != "" {
+			t.Owner = j.Owner
+		}
+		return t, nil
 	}
 	return nil, nil
 }

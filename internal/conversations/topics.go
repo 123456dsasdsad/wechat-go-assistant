@@ -2,6 +2,7 @@ package conversations
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -127,7 +128,7 @@ func (s *Store) RecordTask(id, input string, names []string, at time.Time) error
 		session.LastTask = preview
 		session.LastTaskAt = at
 	}
-	if session == previous {
+	if reflect.DeepEqual(session, previous) {
 		return nil
 	}
 	next := s.state

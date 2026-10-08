@@ -1,0 +1,11 @@
+[Unit]
+Description=Private material library and scholarly egress
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -i /home/worker/.ssh/cloud_key -p 22 -D 127.0.0.1:19923 -R 127.0.0.1:19921:127.0.0.1:19921 clouduser@cloud.example.invalid
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
