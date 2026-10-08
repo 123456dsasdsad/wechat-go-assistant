@@ -23,6 +23,11 @@ import (
 
 const MaxFiles = 64
 
+// Management devices last up to 30 days; short-lived upload/management links
+// share this store. Keep a bounded capacity without exhausting it after a few
+// browser logins and ordinary upload links.
+const MaxGrants = 128
+
 type verifiedReader struct {
 	reader         io.Reader
 	digest         hash.Hash
@@ -151,7 +156,7 @@ func OpenWithLimit(root string, limit int) (*Store, error) {
 			return nil, errors.New("invalid_saved_file")
 		}
 	}
-	if len(s.state.Files) > s.maxFiles || len(s.state.Grants) > 32 {
+	if len(s.state.Files) > s.maxFiles || len(s.state.Grants) > MaxGrants {
 		return nil, errors.New("invalid_files_index_limits")
 	}
 	for id, g := range s.state.Grants {
@@ -358,7 +363,7 @@ func (s *Store) Grant(owner, source string, duration ...time.Duration) (string, 
 			delete(next.Grants, k)
 		}
 	}
-	if len(next.Grants) >= 32 {
+	if len(next.Grants) >= MaxGrants {
 		return "", errors.New("too_many_upload_links")
 	}
 	ttl := 30 * time.Minute

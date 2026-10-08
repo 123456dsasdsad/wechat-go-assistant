@@ -85,6 +85,12 @@ func (in *inbound) workspaceHandler(statePath string) http.Handler {
 				http.Error(w, "验证链接已过期。请在微信发送“管理页面”。", 401)
 				return
 			}
+			if cookie, e := r.Cookie("wechat_manage"); e == nil {
+				if currentOwner, valid := in.files.Authorize(cookie.Value); valid && currentOwner == owner {
+					json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+					return
+				}
+			}
 			device, e := in.files.Grant(owner, "device:"+randomSource(), 30*24*time.Hour)
 			if e != nil {
 				http.Error(w, "登录失败。", 503)
