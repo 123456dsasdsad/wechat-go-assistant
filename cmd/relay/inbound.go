@@ -39,6 +39,7 @@ type inbound struct {
 	quotes           *quotes.Store
 	botID            string
 	assistant        *assistant.Store
+	templates        *assistant.Templates
 }
 
 var statusQuestion = regexp.MustCompile(`^(?:现在)?(?:任务|训练|长期训练|跑完长期训练)(?:进度|的结果在哪|完成了吗|跑完了吗|进行到哪了|怎么样了)$`)
@@ -92,8 +93,11 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		return in.reply(ctx, msg, "quote", "本条消息与引用资料合计最多 4 个文件，请分次发送。")
 	}
 	if len(media) == 0 && !quoted {
+		if handled, e := in.workspaceCommand(ctx, msg, input); handled {
+			return e
+		}
 		if in.assistant != nil {
-			handled, reply, e := in.assistant.Handle(msg.FromUserID, msg.Key(), input, in.sessions.Current().ID, in.preferences.Current(), time.Now())
+			handled, reply, e := in.assistant.Handle(msg.FromUserID, msg.Key(), input, in.sessions.Current().ID, in.preferences.Current(in.sessions.Current().ID), time.Now())
 			if e != nil {
 				return e
 			}
@@ -191,14 +195,14 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		if handled {
 			return in.reply(ctx, msg, "conversation", text)
 		}
-		handled, text, err = in.preferences.Handle(msg.Key(), input)
+		handled, text, err = in.preferences.Handle(msg.Key(), input, in.sessions.Current().ID)
 		if err != nil {
 			return err
 		}
 		if handled {
 			err = in.reply(ctx, msg, "settings", text)
 			if err == nil {
-				choice := in.preferences.Current()
+				choice := in.preferences.Current(in.sessions.Current().ID)
 				fmt.Printf("{\"type\":\"settings_replied\",\"model\":%q,\"effort\":%q}\n", choice.Model, choice.Effort)
 			}
 			return err
@@ -257,7 +261,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		if body == "" {
 			return in.reply(ctx, msg, "steer", "请发送“补充：你的追加要求”。")
 		}
-		j, v, active, e := in.queue.SupplementMessage(msg.Key(), body, msg.FromUserID, msg.ContextToken, in.sessions.Current().ID, in.preferences.Current())
+		j, v, active, e := in.queue.SupplementMessage(msg.Key(), body, msg.FromUserID, msg.ContextToken, in.sessions.Current().ID, in.preferences.Current(in.sessions.Current().ID))
 		if e != nil {
 			return in.reply(ctx, msg, "steer", "补充未保存，请稍后重试或发送普通消息排队。")
 		}
@@ -302,7 +306,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	if input == "" {
 		return in.reply(ctx, msg, "input", "请发送文字任务，或发送“上传文件”获取文件入口。")
 	}
-	choice, body, err := in.preferences.ChoiceForTask(input)
+	choice, body, err := in.preferences.ChoiceForTask(input, in.sessions.Current().ID)
 	if err != nil {
 		return in.reply(ctx, msg, "input", "临时型号无效或格式不正确。发送“模型列表”查看可选项。")
 	}
@@ -318,7 +322,8 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	if in.assistant != nil {
 		memory = in.assistant.MemoryText(msg.FromUserID)
 	}
-	job, err := in.queue.EnqueuePersonalized(msg.Key(), body, msg.FromUserID, msg.ContextToken, choice, refs, session.ID, memory)
+	memory += "\n会话偏好资料：\n" + session.Profile.Notes
+	job, err := in.queue.EnqueuePersonalized(msg.Key(), body, msg.FromUserID, msg.ContextToken, choice, refs, session.ID, memory, session.Profile)
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+
 	"os"
 	"path/filepath"
 	"strings"
@@ -255,7 +256,14 @@ func (s *Store) Each(fn func(Job) error) error {
 	}
 }
 
-func (s *Store) Close() error { _, err := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); return err }
+func (s *Store) Close() error {
+	_, err := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	closeErr := s.db.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
+}
 
 func (s *Store) SetMemory(id, memory string) error {
 	if len(memory) > 80<<10 {
@@ -274,18 +282,26 @@ func (s *Store) SetMemory(id, memory string) error {
 	return s.save(j)
 }
 
-func (s *Store) EnqueuePersonalized(source, input, owner, replyContext string, choice models.Choice, refs []files.Ref, cid, memory string) (Job, error) {
+func (s *Store) EnqueuePersonalized(source, input, owner, replyContext string, choice models.Choice, refs []files.Ref, cid, memory string, profiles ...conversations.Profile) (Job, error) {
 	if len(memory) > 80<<10 {
 		return Job{}, errors.New("memory_too_large")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(profiles) > 0 && !conversations.ValidProject(profiles[0].Project) {
+		return Job{}, errors.New("invalid_project")
+	}
 	j, e := s.enqueue(source, input, owner, replyContext, choice, refs, cid)
 	if e != nil {
 		return Job{}, e
 	}
-	if j.Status == "queued" && j.Memory == "" && memory != "" {
+	if j.Status == "queued" && !j.Initialized {
 		j.Memory = memory
+		if len(profiles) > 0 {
+			j.Project = profiles[0].Project
+			j.BudgetUSD = profiles[0].BudgetUSD
+		}
+		j.Initialized = true
 		e = s.save(j)
 	}
 	return j, e

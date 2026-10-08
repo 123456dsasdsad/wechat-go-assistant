@@ -204,10 +204,39 @@ func run(ctx context.Context) error {
 			return errors.New("account_upload_store_unavailable")
 		}
 	}
-	privateJobs := jobs.HandlerWithOutputs(store, key, fileStore, outputStore, preferences.Current)
+	outbound := &liveResultSender{client: client, contextFor: latestReplyContext(cfg.StatePath)}
+	outbound.remember = quoteRecorder(quoteStore, state.Account.BotID, store)
+	outbound.pauseMedia = store.PauseOwnerMedia
+	outbound.mediaAllowed = func(r weixin.Reply) bool {
+		j, ok := store.Snapshot(outboundJobID(r.ClientID))
+		return ok && j.Owner == r.ToUserID && j.Status == "done" && !j.MediaDeferred && j.MediaContext() == r.ContextToken
+	}
+	assistantStore, err := assistant.Open(filepath.Join(filepath.Dir(cfg.JobsDir), "assistant.sqlite"))
+	if err != nil {
+		return err
+	}
+	templates, err := assistant.OpenTemplates(filepath.Join(filepath.Dir(cfg.JobsDir), "templates.json"))
+	if err != nil {
+		return err
+	}
+	in := &inbound{templates: templates, assistant: assistantStore, client: outbound, preferences: preferences, queue: store, files: fileStore, outputs: outputStore, publicURL: cfg.PublicURL, owner: state.Account.OwnerID, sessions: sessions, reports: reports, accounts: accounts, quotes: quoteStore, botID: state.Account.BotID}
+	privateJobs := jobs.HandlerWithOutputs(store, key, fileStore, outputStore, func() models.Choice { return preferences.Current() })
 	privateMaintenance := maintenance.Handler(reports, key)
 	leaseHandler := maintenanceLease(store, key, filepath.Dir(cfg.JobsDir))
 	privateHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/workspace/grant" {
+			if r.Header.Get("Authorization") != "Bearer "+key {
+				http.Error(w, "unauthorized", 401)
+				return
+			}
+			token, e := fileStore.Grant(state.Account.OwnerID, "private-workspace:"+randomSource())
+			if e != nil {
+				http.Error(w, "grant unavailable", 503)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"url": cfg.PublicURL + "manage/#" + token})
+			return
+		}
 		if r.URL.Path == "/maintenance/lease" {
 			leaseHandler.ServeHTTP(w, r)
 			return
@@ -215,6 +244,10 @@ func run(ctx context.Context) error {
 		if r.Method == "GET" && r.URL.Path == "/maintenance/idle" {
 			if r.Header.Get("Authorization") != "Bearer "+key {
 				http.Error(w, "unauthorized", 401)
+				return
+			}
+			if store.Health() != nil {
+				http.Error(w, "storage error", 503)
 				return
 			}
 			idle := true
@@ -259,7 +292,7 @@ func run(ctx context.Context) error {
 				return nil, errors.New("reply_context_unavailable")
 			}
 			selected := sessions.Current()
-			job, err := store.EnqueueConversation(source, instruction, owner, contextToken, preferences.Current(), []files.Ref{ref}, selected.ID)
+			job, err := in.enqueue(source, instruction, owner, contextToken, selected.ID, []files.Ref{ref})
 			if err != nil {
 				return nil, err
 			}
@@ -275,6 +308,7 @@ func run(ctx context.Context) error {
 		if err != nil {
 			return errors.New("invalid_public_upload_url")
 		}
+		workspaceHandler := in.workspaceHandler(cfg.StatePath)
 		publicHandler := handler
 		var accountHandler http.Handler
 		if accounts != nil {
@@ -286,7 +320,9 @@ func run(ctx context.Context) error {
 		statusHandler := taskStatusHandler(store, outputStore, cfg.PublicURL)
 		downloadHandler := outputStore.DownloadHandler(cfg.PublicURL)
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/wechat-files/accounts/") {
+			if strings.HasPrefix(r.URL.Path, "/wechat-files/manage/") {
+				workspaceHandler.ServeHTTP(w, r)
+			} else if strings.HasPrefix(r.URL.Path, "/wechat-files/accounts/") {
 				if accountHandler == nil {
 					http.NotFound(w, r)
 				} else {
@@ -312,18 +348,7 @@ func run(ctx context.Context) error {
 			uploadServer.Shutdown(shutdown)
 		}()
 	}
-	outbound := &liveResultSender{client: client, contextFor: latestReplyContext(cfg.StatePath)}
-	outbound.remember = quoteRecorder(quoteStore, state.Account.BotID, store)
-	outbound.pauseMedia = store.PauseOwnerMedia
-	outbound.mediaAllowed = func(r weixin.Reply) bool {
-		j, ok := store.Snapshot(outboundJobID(r.ClientID))
-		return ok && j.Owner == r.ToUserID && j.Status == "done" && !j.MediaDeferred && j.MediaContext() == r.ContextToken
-	}
-	assistantStore, err := assistant.Open(filepath.Join(filepath.Dir(cfg.JobsDir), "assistant.sqlite"))
-	if err != nil {
-		return err
-	}
-	in := &inbound{assistant: assistantStore, client: outbound, preferences: preferences, queue: store, files: fileStore, outputs: outputStore, publicURL: cfg.PublicURL, owner: state.Account.OwnerID, sessions: sessions, reports: reports, accounts: accounts, quotes: quoteStore, botID: state.Account.BotID}
+
 	if accounts != nil {
 		go activateAccounts(ctx, cfg, key, accounts, reports)
 	}
@@ -443,7 +468,7 @@ func deliver(ctx context.Context, client *liveResultSender, store *jobs.Store, s
 }
 func markFullyDelivered(store *jobs.Store, id string) {
 	j, ok := store.Snapshot(id)
-	if !ok || j.Status != "done" || !j.PartDelivered("text") {
+	if !ok || j.Status != "done" || !j.PartDelivered("text") || j.OutputPending {
 		return
 	}
 	if hasUnsentOutputs(j) {

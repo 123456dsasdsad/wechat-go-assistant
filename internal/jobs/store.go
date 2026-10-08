@@ -10,8 +10,10 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/usage"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +21,17 @@ import (
 )
 
 type Job struct {
+	TrainingResult       string         `json:"training_result,omitempty"`
+	ExpectedOutputs      []OutputIntent `json:"expected_outputs,omitempty"`
+	OutputPending        bool           `json:"output_pending,omitempty"`
+	Training             Training       `json:"training"`
+	Initialized          bool           `json:"initialized,omitempty"`
+	CancelRequested      bool           `json:"cancel_requested,omitempty"`
+	ParentID             string         `json:"parent_id,omitempty"`
+	Project              string         `json:"project,omitempty"`
+	BudgetReached        bool           `json:"budget_reached,omitempty"`
+	BudgetUSD            float64        `json:"budget_usd,omitempty"`
+	Usage                usage.Tokens   `json:"usage"`
 	Memory               string         `json:"memory,omitempty"`
 	Questions            []UserQuestion `json:"questions,omitempty"`
 	ID                   string         `json:"id"`
@@ -54,6 +67,8 @@ type Job struct {
 }
 
 type Task struct {
+	Project        string      `json:"project,omitempty"`
+	BudgetUSD      float64     `json:"budget_usd,omitempty"`
 	Memory         string      `json:"memory,omitempty"`
 	ID             string      `json:"id"`
 	Input          string      `json:"input"`
@@ -64,13 +79,16 @@ type Task struct {
 	ConversationID string      `json:"conversation_id,omitempty"`
 }
 type Completion struct {
-	ID            string         `json:"id"`
-	Lease         string         `json:"lease"`
-	Result        string         `json:"result"`
-	Error         string         `json:"error,omitempty"`
-	ToolCount     int            `json:"tool_count"`
-	Outputs       []files.Ref    `json:"outputs,omitempty"`
-	SteerReceipts []SteerReceipt `json:"steer_receipts,omitempty"`
+	ExpectedOutputs []OutputIntent `json:"expected_outputs,omitempty"`
+	OutputPending   bool           `json:"output_pending,omitempty"`
+	Usage           usage.Tokens   `json:"usage"`
+	ID              string         `json:"id"`
+	Lease           string         `json:"lease"`
+	Result          string         `json:"result"`
+	Error           string         `json:"error,omitempty"`
+	ToolCount       int            `json:"tool_count"`
+	Outputs         []files.Ref    `json:"outputs,omitempty"`
+	SteerReceipts   []SteerReceipt `json:"steer_receipts,omitempty"`
 }
 type Store struct {
 	mu      sync.Mutex
@@ -90,6 +108,7 @@ func Open(dir string) (*Store, error) {
 	metadb.KeepOpen(db)
 	s := &Store{dir: dir, db: db}
 	if err = s.initialize(); err != nil {
+		db.Close()
 		return nil, err
 	}
 	return s, nil
@@ -152,6 +171,15 @@ func (s *Store) ordered() []Job { return s.query("1=1") }
 func (s *Store) Claim(now time.Time) (*Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, j := range s.query("status='running'") {
+		if j.CancelRequested && !now.Before(j.LeaseUntil) {
+			j.Status = "done"
+			j.Error = "user_canceled"
+			if e := s.save(j); e != nil {
+				return nil, e
+			}
+		}
+	}
 	if s.maintenanceDrained(now) {
 		return nil, nil
 	}
@@ -201,7 +229,7 @@ func (s *Store) Claim(now time.Time) (*Task, error) {
 		if err := s.save(j); err != nil {
 			return nil, err
 		}
-		return &Task{Memory: j.Memory, ID: j.ID, Input: j.Input, Model: j.Model, Effort: j.Effort, Lease: j.Lease, Attachments: append([]files.Ref(nil), j.Attachments...), ConversationID: j.ConversationID}, nil
+		return &Task{Project: j.Project, BudgetUSD: j.BudgetUSD, Memory: j.Memory, ID: j.ID, Input: j.Input, Model: j.Model, Effort: j.Effort, Lease: j.Lease, Attachments: append([]files.Ref(nil), j.Attachments...), ConversationID: j.ConversationID}, nil
 	}
 	return nil, nil
 }
@@ -254,8 +282,24 @@ func (s *Store) Complete(c Completion, now time.Time) error {
 	if !ok || j.Lease != c.Lease || c.Lease == "" {
 		return errors.New("unknown or stale task lease")
 	}
+	if j.CancelRequested && (j.Status == "done" || j.Status == "delivered") && j.Error == "user_canceled" {
+		return nil
+	}
+	if j.CancelRequested {
+		c.Result = ""
+		c.Error = "user_canceled"
+		c.Outputs = nil
+		c.ExpectedOutputs = nil
+		c.OutputPending = false
+	}
+	if !validIntents(c.ExpectedOutputs) || (c.OutputPending && (len(c.ExpectedOutputs) == 0 || len(c.Outputs) > 0)) {
+		return errors.New("invalid_output_intent")
+	}
+	if !c.Usage.Valid() {
+		return errors.New("invalid_usage")
+	}
 	if j.Status == "done" || j.Status == "delivered" {
-		if j.Result == c.Result && j.Error == c.Error && j.ToolCount == c.ToolCount && sameOutputs(j.Outputs, c.Outputs) {
+		if j.Result == c.Result && j.Error == c.Error && j.ToolCount == c.ToolCount && (sameOutputs(j.Outputs, c.Outputs) || (len(c.Outputs) == 0 && c.OutputPending && reflect.DeepEqual(j.ExpectedOutputs, c.ExpectedOutputs))) {
 			return nil
 		}
 		return errors.New("conflicting task result")
@@ -273,11 +317,27 @@ func (s *Store) Complete(c Completion, now time.Time) error {
 	j.Result = c.Result
 	j.Error = c.Error
 	j.ToolCount = c.ToolCount
+	j.Usage = c.Usage
+	if j.BudgetUSD > 0 {
+		_, byConversation, e := s.usageLocked(j.Owner)
+		if e != nil {
+			return e
+		}
+		total := byConversation[j.ConversationID].USD
+		if v, ok := Cost(j); ok {
+			total += v
+		}
+		j.BudgetReached = total >= j.BudgetUSD
+	}
 	j.Outputs = append([]files.Ref(nil), c.Outputs...)
+	j.ExpectedOutputs = append([]OutputIntent(nil), c.ExpectedOutputs...)
+	j.OutputPending = c.OutputPending
 	j.MediaPackageRequired = len(j.Outputs) > 1
 	j.Status = "done"
-	if err := s.finishSupplements(&j, c.SteerReceipts); err != nil {
-		return err
+	if !j.CancelRequested {
+		if err := s.finishSupplements(&j, c.SteerReceipts); err != nil {
+			return err
+		}
 	}
 	return s.save(j)
 }

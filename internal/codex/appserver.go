@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/steering"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/usage"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/userinput"
 	"io"
 	"os"
@@ -163,6 +164,10 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 	if json.Unmarshal(raw, &start) != nil || start.Turn.ID == "" {
 		return result, errors.New("codex_invalid_turn")
 	}
+	baseline := c.UsageBaseline
+	if c.ThreadID == "" {
+		baseline = usage.Tokens{Available: true}
+	}
 	pending := map[int]steering.Receipt{}
 	progress := newProgress(c.Progress)
 	seen := map[string]bool{}
@@ -256,6 +261,14 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 					}
 				}
 				acknowledge(r)
+				continue
+			}
+			if m.Method == "thread/tokenUsage/updated" {
+				var v tokenUsageEvent
+				if json.Unmarshal(m.Params, &v) == nil && v.ThreadID == thread.Thread.ID && v.TurnID == start.Turn.ID {
+					result.Cumulative = v.TokenUsage.Total.tokens()
+					result.Usage = usage.Difference(result.Cumulative, baseline)
+				}
 				continue
 			}
 			var event struct {

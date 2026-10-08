@@ -28,6 +28,7 @@ import (
 )
 
 type config struct {
+	ConfigPath         string `json:"-"`
 	RelayURL           string `json:"relay_url"`
 	RelayKeyFile       string `json:"relay_key_file"`
 	APIKeyFile         string `json:"api_key_file"`
@@ -44,6 +45,27 @@ type config struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--training-run" {
+		fs := flag.NewFlagSet("training", flag.ExitOnError)
+		path := fs.String("config", "", "config")
+		id := fs.String("id", "", "id")
+		resume := fs.Bool("resume", false, "resume")
+		command := fs.String("command", "", "command")
+		fs.Parse(os.Args[2:])
+		b, e := os.ReadFile(*path)
+		var cfg config
+		if e != nil || json.Unmarshal(b, &cfg) != nil {
+			os.Exit(1)
+		}
+		cfg.ConfigPath = *path
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		if e = trainingRun(ctx, cfg, *id, *resume, *command); e != nil {
+			fmt.Fprintln(os.Stderr, e)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--question-mcp" {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
@@ -83,6 +105,7 @@ func run(ctx context.Context) error {
 	if json.Unmarshal(b, &cfg) != nil {
 		return errors.New("invalid_worker_config")
 	}
+	cfg.ConfigPath = *path
 	if cfg.Permissions != "" && cfg.Permissions != ":danger-full-access" {
 		return errors.New("invalid_worker_permissions")
 	}
@@ -128,6 +151,8 @@ func run(ctx context.Context) error {
 		return e
 	}
 	fmt.Printf("{\"type\":\"worker_ready\",\"models\":%d,\"max_concurrent_tasks\":%d}\n", len(catalog.Models), cfg.MaxConcurrentTasks)
+	go trainingManager(ctx, cfg, relayKey)
+	go replayOutbox(ctx, cfg, relayKey)
 	return runWorkerPool(ctx, cfg.MaxConcurrentTasks, func(loopCtx context.Context) error {
 		return workerLoop(loopCtx, cfg, catalog, threads, relayKey, apiKey)
 	})
@@ -208,9 +233,14 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 		if task.ConversationID != "" && !conversations.ValidID(task.ConversationID) {
 			return errors.New("invalid_worker_conversation")
 		}
+		if exists, err := cachedOutbox(cfg, task.ID, task.Lease); err != nil {
+			return err
+		} else if exists {
+			continue
+		}
 		if task.ConversationID != "" {
 			if cached, ok := threads.Cached(task.ConversationID, task.ID); ok {
-				completion := jobs.Completion{ID: task.ID, Lease: task.Lease, Result: cached.Text, Error: cached.Error, ToolCount: cached.ToolCount, Outputs: cached.Outputs, SteerReceipts: cached.SteerReceipts}
+				completion := jobs.Completion{ID: task.ID, Lease: task.Lease, Usage: cached.Usage, Result: cached.Text, Error: cached.Error, ToolCount: cached.ToolCount, Outputs: cached.Outputs, SteerReceipts: cached.SteerReceipts}
 				for attempt := 0; attempt < 4; attempt++ {
 					status, e = call("/jobs/result", completion, nil)
 					if e == nil || status == 409 {
@@ -234,6 +264,13 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 		}
 		taskCtx, finish := context.WithCancel(ctx)
 		finishLease = finish
+		go watchCancellation(taskCtx, finish, func() (bool, error) {
+			var c struct {
+				Cancel bool `json:"cancel"`
+			}
+			_, e := call("/jobs/control", map[string]string{"id": task.ID, "lease": task.Lease}, &c)
+			return c.Cancel, e
+		})
 		go maintainLease(taskCtx, finish, func() (int, error) {
 			return call("/jobs/heartbeat", map[string]string{"id": task.ID, "lease": task.Lease}, nil)
 		})
@@ -241,9 +278,18 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 		conversationDir := dir
 		if task.ConversationID != "" {
 			conversationDir = filepath.Join(cfg.WorkRoot, "sessions", task.ConversationID)
+			if task.Project != "" {
+				if !conversations.ValidProject(task.Project) {
+					return errors.New("invalid_project")
+				}
+				conversationDir = filepath.Join(cfg.WorkRoot, "projects", filepath.FromSlash(task.Project))
+			}
 			dir = filepath.Join(conversationDir, "turns", task.ID)
 		}
 		if e = os.MkdirAll(dir, 0700); e != nil {
+			return e
+		}
+		if e = rememberTraining(cfg, task, dir); e != nil {
 			return e
 		}
 		fixture := filepath.Join(dir, "fixture.txt")
@@ -311,24 +357,19 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 		}
 		questions := &userinput.Connection{URL: cfg.RelayURL, Key: relayKey, JobID: task.ID, Lease: task.Lease, Executable: workerBinary}
 		progress := newRelayProgress(taskCtx, cfg.RelayURL, relayKey, task)
-		result, runErr := codex.Run(runCtx, codex.Config{Binary: cfg.CodexBinary, Home: cfg.CodexHome, Directory: conversationDir, Key: apiKey, Model: task.Model, Effort: task.Effort, Persistent: task.ConversationID != "", ThreadID: nativeThread, Permissions: cfg.Permissions, AppServer: cfg.LiveSteering, Steering: steering, Questions: questions, QuestionMCP: questions, Progress: progress.Publish}, prompt)
+		result, runErr := codex.Run(runCtx, codex.Config{Binary: cfg.CodexBinary, Home: cfg.CodexHome, Directory: conversationDir, Key: apiKey, Model: task.Model, Effort: task.Effort, Persistent: task.ConversationID != "", ThreadID: nativeThread, Permissions: cfg.Permissions, AppServer: cfg.LiveSteering, Steering: steering, Questions: questions, QuestionMCP: questions, UsageBaseline: threads.Usage(task.ConversationID), Progress: progress.Publish}, prompt)
 		progress.Close()
 		cancel()
 		if ctx.Err() != nil {
 			return nil
 		}
-		completion := jobs.Completion{ID: task.ID, Lease: task.Lease, Result: result.Text, ToolCount: result.ToolCount, SteerReceipts: result.SteerReceipts}
-		if runErr == nil {
-			refs, outputErr := uploadOutputs(taskCtx, cfg.RelayURL, relayKey, task, dir)
-			if outputErr != nil {
-				completion.Result += "\n\n结果附件尚未回传（" + outputErr.Error() + "）。请保留当前会话，稍后要求重新发送附件。"
-			} else {
-				completion.Outputs = refs
-			}
-		}
+		completion := jobs.Completion{Usage: result.Usage, ID: task.ID, Lease: task.Lease, Result: result.Text, ToolCount: result.ToolCount, SteerReceipts: result.SteerReceipts}
 		if runErr != nil {
 			completion.Result = ""
-			completion.Error = "codex_turn_failed"
+			completion.Error = runErr.Error()
+			if len(completion.Error) > 80 || strings.ContainsAny(completion.Error, " \n") {
+				completion.Error = "codex_turn_failed"
+			}
 			if errors.Is(runErr, context.DeadlineExceeded) {
 				completion.Error = "codex_timeout"
 			}
@@ -336,27 +377,31 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 				completion.Error = "codex_session_unavailable"
 			}
 		}
+		if taskCtx.Err() != nil && runErr != nil {
+			completion.Error = "context_canceled"
+		}
+		outbox, outboxErr := queueResult(cfg, task, completion, dir)
+		if outboxErr != nil {
+			completion.Error = outboxErr.Error()
+			completion.Result = ""
+			outbox, outboxErr = queueResult(cfg, task, completion, dir)
+		}
+		if outboxErr != nil {
+			return outboxErr
+		}
+		completion = outbox.Completion
+
 		if task.ConversationID != "" {
 			threadID := result.ThreadID
 			if threadID == "" {
 				threadID = nativeThread
 			}
-			if e = threads.Save(conversations.Turn{ConversationID: task.ConversationID, JobID: task.ID, ThreadID: threadID, Text: completion.Result, Error: completion.Error, ToolCount: completion.ToolCount, Outputs: completion.Outputs, SteerReceipts: completion.SteerReceipts}); e != nil {
+			if e = threads.Save(conversations.Turn{ConversationID: task.ConversationID, JobID: task.ID, ThreadID: threadID, Usage: completion.Usage, Cumulative: result.Cumulative, Text: completion.Result, Error: completion.Error, ToolCount: completion.ToolCount, Outputs: completion.Outputs, SteerReceipts: completion.SteerReceipts}); e != nil {
 				return e
 			}
 		}
-		for attempt := 0; attempt < 4; attempt++ {
-			status, e = call("/jobs/result", completion, nil)
-			if e == nil {
-				break
-			}
-			if status == 409 {
-				break
-			}
-			if !pause(ctx, 2*time.Second) {
-				return nil
-			}
-		}
+		e = acceptResult(ctx, cfg, relayKey, outbox)
+
 		fmt.Printf("{\"type\":\"task_finished\",\"id\":%q,\"tools\":%d,\"failed\":%t,\"result_uploaded\":%t}\n", task.ID, result.ToolCount, runErr != nil, e == nil)
 		if !pause(ctx, time.Second) {
 			return nil

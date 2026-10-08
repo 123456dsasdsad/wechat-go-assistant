@@ -18,6 +18,9 @@ import (
 )
 
 type Session struct {
+	Pinned      bool      `json:"pinned,omitempty"`
+	Archived    bool      `json:"archived,omitempty"`
+	Profile     Profile   `json:"profile"`
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`
 	Number      int       `json:"number"`
@@ -207,9 +210,16 @@ func (s *Store) Handle(source, input string) (bool, string, error) {
 	case "会话列表":
 		var sessions []Session
 		for _, session := range next.Sessions {
-			sessions = append(sessions, session)
+			if !session.Archived {
+				sessions = append(sessions, session)
+			}
 		}
-		sort.Slice(sessions, func(i, j int) bool { return sessions[i].Number < sessions[j].Number })
+		sort.Slice(sessions, func(i, j int) bool {
+			if sessions[i].Pinned != sessions[j].Pinned {
+				return sessions[i].Pinned
+			}
+			return sessions[i].Number < sessions[j].Number
+		})
 		var b strings.Builder
 		b.WriteString("会话列表：\n")
 		for _, session := range sessions {
@@ -276,6 +286,8 @@ func (s *Store) Handle(source, input string) (bool, string, error) {
 		if !ok {
 			reply = "未找到这个会话。发送“会话列表”查看编号。"
 		} else {
+			session.Archived = false
+			next.Sessions[session.ID] = session
 			next.Current = session.ID
 			next.MenuExpires = time.Time{}
 			reply = fmt.Sprintf("已继续会话：%d. %s\n%s\n新任务将恢复它的原有上下文。", session.Number, session.DisplayName(), session.Activity())

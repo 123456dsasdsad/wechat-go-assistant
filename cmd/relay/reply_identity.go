@@ -53,10 +53,23 @@ func resultText(j jobs.Job, sessions *conversations.Store, outputs *files.Store,
 			text = header + "\n答复：\n" + answer
 		}
 	}
+	if j.OutputPending {
+		text += "\n附件正在独立回传，失败后自动重试；任务页会自动更新。"
+	}
+	if j.BudgetReached {
+		text += fmt.Sprintf("\n预算提醒：本会话API等值用量达到设置的 $%.2f。", j.BudgetUSD)
+	}
+	if j.Usage.Available {
+		cost, priced := jobs.Cost(j)
+		text += fmt.Sprintf("\n本任务 %d tokens", j.Usage.Total)
+		if priced {
+			text += fmt.Sprintf("，API等值约 $%.4f（非订阅账单）", cost)
+		}
+	}
 	return sessionHeader + text
 }
 func pendingMedia(j jobs.Job) bool {
-	if j.Status != "done" || j.MediaDeferred || !j.PartDelivered("text") {
+	if j.OutputPending || j.Status != "done" || j.MediaDeferred || !j.PartDelivered("text") {
 		return false
 	}
 	return hasUnsentOutputs(j)

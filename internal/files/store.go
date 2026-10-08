@@ -77,6 +77,7 @@ type state struct {
 }
 type Store struct {
 	mu       sync.Mutex
+	chunkMu  sync.Mutex
 	root     string
 	key      []byte
 	state    state
@@ -341,7 +342,7 @@ func (s *Store) token(source string, g grant) string {
 	h.Write([]byte(source + "\x00" + g.Owner + "\x00" + g.Expires.Format(time.RFC3339Nano)))
 	return hex.EncodeToString(h.Sum(nil))
 }
-func (s *Store) Grant(owner, source string) (string, error) {
+func (s *Store) Grant(owner, source string, duration ...time.Duration) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if owner == "" || source == "" {
@@ -360,7 +361,11 @@ func (s *Store) Grant(owner, source string) (string, error) {
 	if len(next.Grants) >= 32 {
 		return "", errors.New("too_many_upload_links")
 	}
-	g := grant{Owner: owner, Expires: s.now().Add(30 * time.Minute).UTC()}
+	ttl := 30 * time.Minute
+	if len(duration) > 0 && duration[0] > 0 && duration[0] <= 30*24*time.Hour {
+		ttl = duration[0]
+	}
+	g := grant{Owner: owner, Expires: s.now().Add(ttl).UTC()}
 	token := s.token(id, g)
 	g.Hash = digest(token)
 	next.Grants[id] = g

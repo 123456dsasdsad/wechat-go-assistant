@@ -9,6 +9,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/steering"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/usage"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/userinput"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ import (
 )
 
 type Config struct {
+	UsageBaseline                                         usage.Tokens
 	Binary, Home, Directory, Key, Model, Effort, ThreadID string
 	Persistent                                            bool
 	Permissions                                           string
@@ -27,6 +29,8 @@ type Config struct {
 	Progress                                              func(string)
 }
 type Result struct {
+	Usage         usage.Tokens       `json:"usage"`
+	Cumulative    usage.Tokens       `json:"cumulative"`
 	Text          string             `json:"text"`
 	ToolCount     int                `json:"tool_count"`
 	ThreadID      string             `json:"thread_id,omitempty"`
@@ -130,6 +134,16 @@ func Run(ctx context.Context, c Config, prompt string) (Result, error) {
 			}
 		case "turn.completed":
 			complete = true
+			var v struct {
+				Usage *struct {
+					Input  int64 `json:"input_tokens"`
+					Cached int64 `json:"cached_input_tokens"`
+					Output int64 `json:"output_tokens"`
+				} `json:"usage"`
+			}
+			if json.Unmarshal(raw, &v) == nil && v.Usage != nil {
+				result.Usage = usage.Tokens{Available: true, Input: v.Usage.Input, Cached: v.Usage.Cached, Output: v.Usage.Output, Total: v.Usage.Input + v.Usage.Output}
+			}
 		case "turn.failed", "error":
 			failed = true
 		}

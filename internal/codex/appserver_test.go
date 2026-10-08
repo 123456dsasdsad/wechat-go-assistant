@@ -85,7 +85,11 @@ func fakeAppServer(mode string) {
 			}
 			emit(map[string]any{"id": id, "method": "item/tool/requestUserInput", "params": map[string]any{"threadId": thread, "turnId": turn, "itemId": "question-item", "isBlocking": true, "autoResolutionMs": 1, "questions": []any{map[string]any{"id": "format", "header": "格式", "question": "选择格式", "options": []any{map[string]string{"label": "SVG", "description": "矢量图"}}}}}})
 		}
-		if mode == "progress" && r.Method == "turn/start" {
+		if mode == "usage" && r.Method == "turn/start" {
+			emit(map[string]any{"method": "thread/tokenUsage/updated", "params": map[string]any{"threadId": thread, "turnId": turn, "tokenUsage": map[string]any{"total": map[string]int64{"inputTokens": 400, "cachedInputTokens": 50, "outputTokens": 20, "totalTokens": 420}}}})
+			emit(map[string]any{"method": "thread/tokenUsage/updated", "params": map[string]any{"threadId": thread, "turnId": "other", "tokenUsage": map[string]any{"total": map[string]int64{"inputTokens": 999999, "totalTokens": 999999}}}})
+		}
+		if (mode == "progress" || mode == "usage") && r.Method == "turn/start" {
 			emit(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"threadId": thread, "turnId": "another-turn", "itemId": "foreign", "delta": "其他任务内容"}})
 			emit(map[string]any{"method": "item/reasoning/textDelta", "params": map[string]any{"threadId": thread, "turnId": turn, "itemId": "private", "delta": "不应显示的推理"}})
 			emit(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"threadId": thread, "turnId": turn, "itemId": "comment", "delta": "正在检查"}})

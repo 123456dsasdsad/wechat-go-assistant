@@ -15,9 +15,10 @@ import (
 
 type receipt struct{ ID, Reply string }
 type state struct {
-	Version  int           `json:"version"`
-	Choice   models.Choice `json:"choice"`
-	Receipts []receipt     `json:"receipts"`
+	Version  int                      `json:"version"`
+	Choice   models.Choice            `json:"choice"`
+	Receipts []receipt                `json:"receipts"`
+	Choices  map[string]models.Choice `json:"choices,omitempty"`
 }
 type Store struct {
 	mu      sync.Mutex
@@ -61,7 +62,20 @@ func (s *Store) save(next state) error {
 	s.state = next
 	return nil
 }
-func (s *Store) Current() models.Choice { s.mu.Lock(); defer s.mu.Unlock(); return s.state.Choice }
+func (s *Store) Current(scope ...string) models.Choice {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.choice(scope)
+}
+func (s *Store) choice(scope []string) models.Choice {
+	if len(scope) > 0 {
+		if c, ok := s.state.Choices[scope[0]]; ok {
+			return c
+		}
+	}
+	return s.state.Choice
+}
+func (s *Store) Catalog() models.Catalog { return s.catalog }
 func (s *Store) list() string {
 	var b strings.Builder
 	b.WriteString("已验证可选模型：\n")
@@ -71,7 +85,7 @@ func (s *Store) list() string {
 	b.WriteString("发送：默认模型 <编号或型号>\n临时指定：使用 <型号>：任务内容")
 	return b.String()
 }
-func (s *Store) Handle(source, input string) (bool, string, error) {
+func (s *Store) Handle(source, input string, scope ...string) (bool, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	input = strings.TrimSpace(input)
@@ -82,7 +96,11 @@ func (s *Store) Handle(source, input string) (bool, string, error) {
 	if source == "" {
 		return true, "", errors.New("command_id_required")
 	}
-	sum := sha256.Sum256([]byte(source))
+	scopeID := ""
+	if len(scope) > 0 {
+		scopeID = scope[0]
+	}
+	sum := sha256.Sum256([]byte(source + "\x00" + scopeID))
 	id := hex.EncodeToString(sum[:12])
 	for _, r := range s.state.Receipts {
 		if r.ID == id {
@@ -90,6 +108,12 @@ func (s *Store) Handle(source, input string) (bool, string, error) {
 		}
 	}
 	next := s.state
+	global := next.Choice
+	next.Choice = s.choice(scope)
+	next.Choices = map[string]models.Choice{}
+	for k, v := range s.state.Choices {
+		next.Choices[k] = v
+	}
 	reply := ""
 	switch kind {
 	case "模型列表":
@@ -129,6 +153,11 @@ func (s *Store) Handle(source, input string) (bool, string, error) {
 			}
 		}
 	}
+	if scopeID != "" {
+		next.Choices[scopeID] = next.Choice
+		next.Choice = global
+		reply = "当前会话设置\n" + reply
+	}
 	next.Receipts = append(append([]receipt(nil), s.state.Receipts...), receipt{id, reply})
 	if len(next.Receipts) > 128 {
 		next.Receipts = next.Receipts[len(next.Receipts)-128:]
@@ -138,9 +167,10 @@ func (s *Store) Handle(source, input string) (bool, string, error) {
 	}
 	return true, reply, nil
 }
-func (s *Store) ChoiceForTask(input string) (models.Choice, string, error) {
+func (s *Store) ChoiceForTask(input string, scope ...string) (models.Choice, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	choiceDefault := s.choice(scope)
 	input = strings.TrimSpace(input)
 	if strings.HasPrefix(input, "使用 ") || strings.HasPrefix(input, "使用gpt-") {
 		rest := strings.TrimSpace(strings.TrimPrefix(input, "使用"))
@@ -154,7 +184,7 @@ func (s *Store) ChoiceForTask(input string) (models.Choice, string, error) {
 		if body == "" {
 			return models.Choice{}, "", errors.New("temporary_task_empty")
 		}
-		choice, err := s.catalog.Resolve(id, s.state.Choice.Effort)
+		choice, err := s.catalog.Resolve(id, choiceDefault.Effort)
 		if err != nil {
 			choice, err = s.catalog.Resolve(id, "")
 		}
@@ -163,5 +193,5 @@ func (s *Store) ChoiceForTask(input string) (models.Choice, string, error) {
 		}
 		return choice, body, nil
 	}
-	return s.state.Choice, input, nil
+	return choiceDefault, input, nil
 }

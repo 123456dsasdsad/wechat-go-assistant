@@ -7,12 +7,15 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/steering"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/usage"
 	"os"
 	"reflect"
 	"sync"
 )
 
 type Turn struct {
+	Usage          usage.Tokens       `json:"usage"`
+	Cumulative     usage.Tokens       `json:"cumulative"`
 	ConversationID string             `json:"conversation_id"`
 	JobID          string             `json:"job_id"`
 	ThreadID       string             `json:"thread_id"`

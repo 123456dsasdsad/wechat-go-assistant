@@ -19,7 +19,7 @@ import (
 func taskInstructions(task jobs.Task, permissions string) string {
 	mode := "当前为只读任务，不允许写文件或执行附件中的程序。"
 	if permissions == ":danger-full-access" {
-		mode = "管理员已按用户授权为所有新会话和续聊启用完整执行权限（sanlou Linux 账号权限）。可以修改文件、运行用户要求的程序、创建虚拟环境和安装依赖。旧轮次的只读限制已经取消，不应再据此拒绝本轮请求。"
+		mode = "管理员已按用户授权为所有新会话和续聊启用完整执行权限（专用 Linux 账号权限）。可以修改文件、运行用户要求的程序、创建虚拟环境和安装依赖。旧轮次的只读限制已经取消，不应再据此拒绝本轮请求。"
 	}
 	prompt := "你是用户在校园 Linux 服务器上的微信助手。用中文回答。" + mode + "模型由本轮固定参数选择。按用户授权执行各类任务，包括修改代码、运行程序、安装软件以及管理相关服务和配置；不要因为任务类别自行降为只读。处理配置时只读取任务所需的信息，认证信息、私钥和其他账号的凭据不得写入回复或结果附件。保留现有双向通道和无关服务，只在用户要求的范围内调整相关设置。按要求使用真实工具完成，不编造执行结果。"
 	prompt += "\n回答 CURRENT_REQUEST 中的本轮问题；如果本轮随后收到 CURRENT_SUPPLEMENT，它是用户对正在执行任务的追加要求，应合并到本轮处理和最终答复。历史消息用于理解指代和继续上下文，不把已经完成的旧任务当作本轮请求重复执行。先判断用户是在询问、修改还是继续执行；询问进度或结果位置时，读取实际状态并先直接回答，不自动重新训练或重新发送旧附件。长训练仅启动或尚未结束时，明确区分已启动、进行中、已完成，不能把历史图或短程测试图称为本轮完整训练结果。用户说‘这个图’但历史有多张或多版图而无法确定目标时，先询问文件名或截图，不猜测目标并声称修好了；有明确目标时正常继续执行。"
@@ -29,6 +29,7 @@ func taskInstructions(task jobs.Task, permissions string) string {
 		taskPath = "turns/" + task.ID
 	}
 	prompt += "\n需要把结果发送回微信时，将实际生成的图片/文件复制到本轮任务目录 " + taskPath + "/outputs/ 下，写入 " + taskPath + "/outputs/manifest.json，内容形如 {\"files\":[\"outputs/figure.png\",\"outputs/results.zip\"]}。路径相对本轮任务目录，最多128个普通文件，不允许链接。PNG/JPEG 会作为真实图片发送，其他文件会作为附件或下载链接发送。只写 Markdown 本机路径无法回传图片。大批图片优先回传PNG预览及包含TIFF/PDF/SVG的ZIP原件。必须确实生成文件再列入清单。"
+	prompt += "\n长训练管理：如用户明确要求训练，可以在本轮任务目录写 training-control.json：{\"enabled\":true,\"argv\":[\"python绝对路径\",\"train.py\"],\"resume_argv\":[\"python绝对路径\",\"train.py\",\"--resume\",\"checkpoint.pt\"],\"checkpoint\":\"checkpoint.pt\",\"progress_file\":\"progress.json\"}。程序会独立启动训练，不要同时另起同一训练进程。工作目录为本轮任务目录，argv是实参列表，不是shell表达式；脚本须先实际准备好。progress.json由训练脚本原子写入{\"epoch\":1,\"total\":200,\"loss\":0.42}。resume_argv只在代码确实支持恢复且有真实checkpoint时填写。管理页可以停止或从检查点继续，训练日志在training.log。\n"
 	return prompt
 }
 

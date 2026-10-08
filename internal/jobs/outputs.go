@@ -182,8 +182,8 @@ func (s *Store) SetMediaPackage(id string, ref files.Ref) error {
 func (s *Store) PauseOwnerMedia(owner string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, j := range s.query("owner=? AND status='done' AND outputs>0", owner) {
-		if j.Owner != owner || j.Status != "done" || !hasPendingMedia(j) || j.MediaDeferred {
+	for _, j := range s.query("owner=? AND status IN ('done','delivered')", owner) {
+		if j.Owner != owner || (!j.OutputPending && !hasPendingMedia(j)) || j.MediaDeferred {
 			continue
 		}
 		j.MediaDeferred, j.MediaRequested = true, false

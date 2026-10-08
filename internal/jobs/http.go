@@ -37,6 +37,60 @@ func HandlerWithOutputs(s *Store, key string, fileStore, outputStore *files.Stor
 			}
 		}
 		switch {
+		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/jobs/training/"):
+			var e error
+			var result any = map[string]bool{"ok": true}
+			switch r.URL.Path {
+			case "/jobs/training/outputs":
+				var c Completion
+				if json.NewDecoder(http.MaxBytesReader(w, r.Body, 96<<10)).Decode(&c) != nil {
+					http.Error(w, "invalid", 400)
+					return
+				}
+				e = s.BeginTrainingOutputs(c)
+			case "/jobs/training/update":
+				var u TrainingUpdate
+				if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&u) != nil {
+					http.Error(w, "invalid", 400)
+					return
+				}
+				e = s.UpdateTraining(u)
+			case "/jobs/training/commands":
+				var rows []Job
+				rows, e = s.TrainingCommands()
+				safe := []map[string]any{}
+				for _, j := range rows {
+					safe = append(safe, map[string]any{"id": j.ID, "training": j.Training})
+				}
+				result = safe
+			case "/jobs/training/state":
+				var b struct{ ID, Lease string }
+				if json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048)).Decode(&b) != nil {
+					http.Error(w, "invalid", 400)
+					return
+				}
+				result, e = s.TrainingState(b.ID, b.Lease)
+			default:
+				http.NotFound(w, r)
+				return
+			}
+			if e != nil {
+				http.Error(w, "training request rejected", 409)
+				return
+			}
+			json.NewEncoder(w).Encode(result)
+		case r.Method == "POST" && r.URL.Path == "/jobs/control":
+			var b struct{ ID, Lease string }
+			if json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048)).Decode(&b) != nil {
+				http.Error(w, "invalid", 400)
+				return
+			}
+			stop, e := s.Cancelled(b.ID, b.Lease)
+			if e != nil {
+				http.Error(w, "invalid lease", 409)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]bool{"cancel": stop})
 		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/jobs/questions/"):
 			s.questionsHTTP(w, r)
 		case r.Method == "POST" && r.URL.Path == "/jobs/progress":
@@ -74,7 +128,7 @@ func HandlerWithOutputs(s *Store, key string, fileStore, outputStore *files.Stor
 				}
 				io.WriteString(w, "{}")
 			}
-		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/jobs/") && strings.Contains(r.URL.Path, "/outputs/") && outputStore != nil:
+		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/jobs/") && strings.Contains(r.URL.Path, "/outputs/") && r.URL.Path != "/jobs/outputs/finish" && outputStore != nil:
 			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 			if len(parts) != 4 || parts[0] != "jobs" || parts[2] != "outputs" {
 				http.NotFound(w, r)
@@ -85,7 +139,7 @@ func HandlerWithOutputs(s *Store, key string, fileStore, outputStore *files.Stor
 				http.Error(w, "invalid output index", 400)
 				return
 			}
-			owner, e := s.OutputOwner(parts[1], r.Header.Get("X-Job-Lease"), time.Now(), false)
+			owner, e := s.CheckOutputUpload(parts[1], r.Header.Get("X-Job-Lease"), index, r.URL.Query().Get("name"), r.Header.Get("X-File-SHA256"), r.ContentLength, time.Now())
 			if e != nil {
 				http.Error(w, "invalid output lease", 403)
 				return
@@ -123,7 +177,11 @@ func HandlerWithOutputs(s *Store, key string, fileStore, outputStore *files.Stor
 			if len(current) > 0 {
 				choice = current[0]()
 			}
-			json.NewEncoder(w).Encode(map[string]any{"ok": true, "model": choice.Model, "effort": choice.Effort})
+			healthy := s.Health() == nil
+			if !healthy {
+				w.WriteHeader(503)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"ok": healthy, "model": choice.Model, "effort": choice.Effort})
 		case r.Method == "POST" && r.URL.Path == "/jobs/claim":
 			task, err := s.Claim(time.Now())
 			if err != nil {
@@ -135,7 +193,7 @@ func HandlerWithOutputs(s *Store, key string, fileStore, outputStore *files.Stor
 				return
 			}
 			json.NewEncoder(w).Encode(task)
-		case r.Method == "POST" && r.URL.Path == "/jobs/result":
+		case r.Method == "POST" && (r.URL.Path == "/jobs/result" || r.URL.Path == "/jobs/outputs/finish"):
 			var c Completion
 			d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128*1024))
 			d.DisallowUnknownFields()
@@ -157,7 +215,13 @@ func HandlerWithOutputs(s *Store, key string, fileStore, outputStore *files.Stor
 					}
 				}
 			}
-			if err := s.Complete(c, time.Now()); err != nil {
+			complete := func() error {
+				if r.URL.Path == "/jobs/outputs/finish" {
+					return s.FinishOutputs(c)
+				}
+				return s.Complete(c, time.Now())
+			}
+			if err := complete(); err != nil {
 				http.Error(w, "stale or invalid result", 409)
 				return
 			}
