@@ -328,8 +328,8 @@ func (s AccountSummary) Text(day string) string {
 		}
 	}
 	fmt.Fprintf(&b, "【账号状态｜%s 07:00｜阿里云共享池】\n总数 %d；可用 %d；额度/频率受限 %d；失效或停用 %d；待核实 %d。\n本次清理：隔离 %d 个失效账号。", day, len(s.Accounts), available, limited, disabled, unknown, s.Quarantined)
-	for _, a := range s.Accounts {
-		fmt.Fprintf(&b, "\n%s：%s", a.Alias, a.State)
+	for i, a := range s.Accounts {
+		fmt.Fprintf(&b, "\n\n【账号 %d｜%s】\n状态：%s", i+1, a.Alias, a.State)
 		if a.Reason != "" {
 			b.WriteString("（" + a.Reason + "）")
 		}
@@ -340,13 +340,36 @@ func (s AccountSummary) Text(day string) string {
 			label := "额度窗口"
 			if w.Seconds > 0 {
 				label = fmt.Sprintf("%g 小时额度", float64(w.Seconds)/3600)
+				if w.Seconds%86400 == 0 {
+					label = fmt.Sprintf("%d 天额度", w.Seconds/86400)
+				}
 			}
-			fmt.Fprintf(&b, "\n  %s：已用 %.1f%%，剩余 %.1f%%", label, w.Used, 100-w.Used)
+			fmt.Fprintf(&b, "\n%s：剩余 %.1f%%（已用 %.1f%%）", label, 100-w.Used, w.Used)
 			if w.Reset > 0 {
-				fmt.Fprintf(&b, "；重置 %s", time.Unix(w.Reset, 0).In(Beijing).Format("01-02 15:04"))
+				fmt.Fprintf(&b, "\n重置时间：%s", time.Unix(w.Reset, 0).In(Beijing).Format("01-02 15:04"))
 			}
 		}
 	}
-	b.WriteString("\n仅明确撤销/永久失效才隔离；额度用完、网络异常保留。隔离记录可恢复，不删除原始备份。")
+	b.WriteString("\n\n清理规则：仅明确撤销/永久失效才隔离；额度用完、网络异常保留。隔离记录可恢复，不删除原始备份。")
 	return b.String()
+}
+
+// AccountParagraphs also presents persisted reports from older builds clearly,
+// without changing the source check time, account data, or delivery receipts.
+func AccountParagraphs(text string) string {
+	var out []string
+	index := 0
+	for _, line := range strings.Split(text, "\n") {
+		alias, state, ok := strings.Cut(line, "：")
+		if ok && strings.Contains(alias, "@") && !strings.HasPrefix(alias, "【") {
+			index++
+			if len(out) > 0 && out[len(out)-1] != "" {
+				out = append(out, "")
+			}
+			out = append(out, fmt.Sprintf("【账号 %d｜%s】", index, alias), "状态："+state)
+		} else {
+			out = append(out, strings.Replace(line, "；重置 ", "\n重置时间：", 1))
+		}
+	}
+	return strings.Join(out, "\n")
 }

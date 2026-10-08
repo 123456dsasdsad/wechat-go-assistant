@@ -141,7 +141,7 @@ func (r CampusAccounts) Text() string {
 			b.WriteString("\n注意：以下为旧快照，今日最新检查尚未取得；更新后会自动补充。")
 		}
 		b.WriteString("\n\n")
-		b.WriteString(r.Source.Text)
+		b.WriteString(AccountParagraphs(r.Source.Text))
 	}
 	text := []rune(b.String())
 	if len(text) > 5000 {

@@ -218,7 +218,11 @@ func (s *Store) Latest(kind string) string {
 		if b.Len() > 0 {
 			b.WriteString("\n\n")
 		}
-		b.WriteString(r.Text)
+		if r.Kind == "accounts" {
+			b.WriteString(AccountParagraphs(r.Text))
+		} else {
+			b.WriteString(r.Text)
+		}
 	}
 	if b.Len() == 0 {
 		return "暂时还没有这类运维报告。每天北京时间 07:00 更新和账号检查，00:00 统计前一天用量。"
