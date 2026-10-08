@@ -172,7 +172,9 @@ func (c *Client) Download(ctx context.Context, owner, sha string) (io.ReadCloser
 		return nil, e
 	}
 	r.Header.Set("Authorization", "Bearer "+c.Key)
-	res, e := c.HTTP.Do(r)
+	client := *c.HTTP
+	client.Timeout = 0 // Streaming uses the request context rather than a total-size-dependent deadline.
+	res, e := client.Do(r)
 	if e != nil {
 		return nil, e
 	}
@@ -232,5 +234,9 @@ func (c *Client) Upload(ctx context.Context, owner, iid string, a Asset, src io.
 		return e
 	}
 	r.ContentLength = a.Size
-	return c.do(r, nil)
+	stream := *c
+	client := *c.HTTP
+	client.Timeout = 0
+	stream.HTTP = &client
+	return stream.do(r, nil)
 }
