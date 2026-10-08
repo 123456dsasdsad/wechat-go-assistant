@@ -111,10 +111,19 @@ def run():
         # Persistent morning runs wait for any catch-up retry after reboot.
         try:fcntl.flock(lock,fcntl.LOCK_EX if action=='morning' else fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:return
-        if action=='morning':updates();invoke('accounts')
+        if action=='morning':
+            # A release lookup failure must not suppress the account report.
+            failures=[]
+            for step in [updates,lambda:invoke('accounts')]:
+                try:step()
+                except Exception as ex:failures.append(type(ex).__name__)
+            if failures:raise RuntimeError('morning_step_failed')
         elif action=='usage':invoke('usage')
         elif action=='retry':
             invoke('retry-publish')
+            # Cloud checks may finish after the campus 07:00 timer. Publish a
+            # follow-up only when the shared source or campus connectivity changes.
+            invoke('accounts','-if-changed')
             last=ROOT/'updates-result.json'
             if last.exists() and any(u['state']=='AI 任务运行中，延后自动安装' for u in json.loads(last.read_text())) and idle(json.loads(CONFIG.read_text())):updates()
         else:raise RuntimeError('unknown_action')

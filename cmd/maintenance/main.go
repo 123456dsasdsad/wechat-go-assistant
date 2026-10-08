@@ -17,13 +17,15 @@ import (
 )
 
 type config struct {
-	Host        string                `json:"host"`
-	Root        string                `json:"root"`
-	RelayURL    string                `json:"relay_url"`
-	KeyFile     string                `json:"key_file"`
-	GatewayRoot string                `json:"gateway_root"`
-	UsageLog    string                `json:"usage_log"`
-	Programs    []maintenance.Program `json:"programs"`
+	Host           string                `json:"host"`
+	Root           string                `json:"root"`
+	RelayURL       string                `json:"relay_url"`
+	KeyFile        string                `json:"key_file"`
+	GatewayRoot    string                `json:"gateway_root"`
+	GatewayURL     string                `json:"gateway_url"`
+	GatewayKeyFile string                `json:"gateway_key_file"`
+	UsageLog       string                `json:"usage_log"`
+	Programs       []maintenance.Program `json:"programs"`
 }
 
 func main() {
@@ -37,6 +39,7 @@ func run() error {
 	action := flag.String("action", "", "usage, accounts, models, updates, publish, retry-publish, status")
 	dayFlag := flag.String("day", "", "Beijing date; usage defaults to yesterday")
 	dry := flag.Bool("dry-run", false, "no account mutations or report publication")
+	ifChanged := flag.Bool("if-changed", false, "skip unchanged campus account follow-ups")
 	input := flag.String("input", "", "JSON update results for publish")
 	flag.Parse()
 	raw, e := os.ReadFile(*path)
@@ -122,16 +125,17 @@ func run() error {
 			detail = sum
 			text = sum.Text(day)
 		} else {
-			text = "【校园账号检查｜" + day + " 07:00】\n校园使用阿里云共享账号池，无独立账号副本；失效账号由阿里云统一隔离，详见“账号状态”。"
-			req, _ := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(cfg.RelayURL, "/")+"/health", nil)
-			req.Header.Set("Authorization", "Bearer "+key)
-			resp, e := client.Do(req)
-			if e != nil {
-				text += "\n私有通道检查：暂时连接失败（保留配置）。"
-			} else {
-				resp.Body.Close()
-				text += fmt.Sprintf("\n私有通道检查：HTTP %d。", resp.StatusCode)
+			gatewayKey, _ := os.ReadFile(cfg.GatewayKeyFile)
+			sum := maintenance.CheckCampusAccounts(ctx, &http.Client{Timeout: 15 * time.Second}, cfg.RelayURL, key, cfg.GatewayURL, strings.TrimSpace(string(gatewayKey)), day, time.Now())
+			if *ifChanged {
+				previousRaw, _ := os.ReadFile(filepath.Join(cfg.Root, "accounts-"+day+".json"))
+				var previous maintenance.CampusAccounts
+				if json.Unmarshal(previousRaw, &previous) == nil && sum.SameResult(previous) {
+					return json.NewEncoder(os.Stdout).Encode(map[string]bool{"skipped_unchanged": true})
+				}
 			}
+			detail = sum
+			text = sum.Text()
 		}
 	case "updates":
 		fetcher := maintenance.Fetcher{Client: client}

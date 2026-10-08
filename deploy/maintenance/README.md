@@ -1,5 +1,7 @@
 # Native server maintenance
 
+The campus installer uses Python 3.11 or newer (including the standard `tomllib`).
+
 The scripts and Go command make no model calls. Windows tasks and campus user
 systemd timers run independently of the user's computer, in Beijing time.
 
@@ -71,6 +73,21 @@ The account report includes total/available/limited/disabled/unverified counts,
 quota-window used and remaining percentages, reset times, and quarantine results.
 HTTP 200 alone does not establish available quota. Missing quota fields remain
 unverified; quota exhaustion never triggers permanent-account cleanup.
+Campus account reports include the masked shared-pool entries, quota windows,
+reset and quarantine results, plus their source check time. The campus separately
+checks its authenticated relay health and model catalog, without inference or
+copying account credentials. Missing or previous-day snapshots are explicitly
+marked unverified or stale. The 15-minute retry publishes a follow-up when cloud
+checks finish later; unchanged results are not sent again. An update lookup
+failure does not suppress the campus morning account check.
+Private queries can select a structured source with
+`/maintenance/reports?host=cloud&kind=accounts`. This uses the existing private
+Bearer authentication. Campus configuration adds `gateway_url` (the selected
+Codex provider base URL) and `gateway_key_file` (the existing worker API key file).
+Maintenance text is split at 2000 Unicode characters with durable per-part
+receipts, so a rejected later part resumes without replaying accepted parts.
+Numeric WeChat API rejection codes remain in the receipt; API rejection never
+counts as successful notification.
 Usage accounting has a separate runner lock so a simultaneous maintenance retry
 cannot silently skip the midnight report. Windows native JSON is decoded as UTF-8
 explicitly, including when run by Windows PowerShell 5.1 under SYSTEM.

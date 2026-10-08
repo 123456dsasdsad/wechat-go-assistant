@@ -27,6 +27,7 @@ type Report struct {
 	Attempts    int       `json:"attempts,omitempty"`
 	NextAttempt time.Time `json:"next_attempt,omitempty"`
 	LastError   string    `json:"last_error,omitempty"`
+	SentChunks  int       `json:"sent_chunks,omitempty"`
 }
 
 func NewReport(host, kind, day, text string) Report {
@@ -100,6 +101,43 @@ func (s *Store) Put(r Report) error {
 	r.Attempts = 0
 	r.NextAttempt = time.Time{}
 	r.LastError = ""
+	r.SentChunks = 0
+	return AtomicJSON(p, r)
+}
+
+// LatestReport selects one source independently of newer reports on other hosts.
+func (s *Store) LatestReport(host, kind string) (Report, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var latest Report
+	found := false
+	for _, r := range s.list() {
+		if r.Host == host && r.Kind == kind {
+			latest, found = r, true
+		}
+	}
+	return latest, found
+}
+
+func (s *Store) CommitChunk(id string, sent int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(id) != 24 {
+		return errors.New("invalid_report")
+	}
+	if _, e := hex.DecodeString(id); e != nil {
+		return errors.New("invalid_report")
+	}
+	p := filepath.Join(s.Dir, id+".json")
+	b, e := os.ReadFile(p)
+	var r Report
+	if e != nil || json.Unmarshal(b, &r) != nil {
+		return errors.New("report_unavailable")
+	}
+	if sent != r.SentChunks+1 {
+		return errors.New("invalid_report_chunk")
+	}
+	r.SentChunks = sent
 	return AtomicJSON(p, r)
 }
 func (s *Store) list() []Report {

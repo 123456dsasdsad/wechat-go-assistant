@@ -13,7 +13,7 @@ func Handler(store *Store, key string) http.Handler {
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/maintenance/release":
 			bridge.ServeHTTP(w, r)
@@ -27,6 +27,20 @@ func Handler(store *Store, key string) http.Handler {
 			}
 			json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 		case r.Method == "GET" && r.URL.Path == "/maintenance/reports":
+			if host := r.URL.Query().Get("host"); host != "" {
+				kind := r.URL.Query().Get("kind")
+				if (host != "cloud" && host != "campus") || (kind != "accounts" && kind != "updates" && kind != "usage" && kind != "status") {
+					http.Error(w, "invalid_report_filter", http.StatusBadRequest)
+					return
+				}
+				report, ok := store.LatestReport(host, kind)
+				if !ok {
+					http.Error(w, "report_unavailable", http.StatusNotFound)
+					return
+				}
+				json.NewEncoder(w).Encode(map[string]any{"text": report.Text, "report": report})
+				return
+			}
 			json.NewEncoder(w).Encode(map[string]string{"text": store.Latest(r.URL.Query().Get("kind"))})
 		default:
 			http.NotFound(w, r)

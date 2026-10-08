@@ -27,7 +27,9 @@ jobs:
       - run: go test -mod=vendor ./...
       - run: go vet -mod=vendor ./...
       - if: runner.os == 'Linux'
-        run: go test -mod=vendor -race ./cmd/worker ./cmd/relay ./internal/jobs ./internal/conversations
+        run: go test -mod=vendor -race ./cmd/worker ./cmd/relay ./internal/jobs ./internal/conversations ./internal/maintenance
+      - if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s deploy/maintenance -p 'test_*.py'
 
   build:
     runs-on: ubuntu-latest
