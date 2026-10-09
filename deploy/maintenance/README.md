@@ -100,6 +100,8 @@ report IDs, timestamps and send receipts alone never count as changed results.
 The cloud catalog retry resumes model-permission checks without repeating a
 completed daily account check or its quota notification. A missing daily account
 checkpoint is still retried, and failed report submissions retain their outbox.
+An independent applied marker resumes a credential reload interrupted by a
+catalog or health-check failure, without generating another account report.
 Update notifications distinguish `软件更新待安装`, `软件更新完成` and
 `软件更新检查`. A completion after a deferred morning check is a new result;
 the original check time remains visible if WeChat accepts it later.

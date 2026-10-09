@@ -143,21 +143,29 @@ function Apply-Updates {
  $null=Invoke-Maintenance 'publish' @('-input',$taskResult)
 }
 function Check-Accounts([switch]$ResumeOnly) {
+ $taskPendingPath=Join-Path $taskRoot 'accounts-pending.flag'
+ [IO.File]::WriteAllText($taskPendingPath,'1')
  $taskLease=Lease 'acquire'
  if(!$taskLease){[IO.File]::WriteAllText((Join-Path $taskRoot 'accounts-pending.flag'),'1');return}
  try {
   if(!(Test-Idle)){[IO.File]::WriteAllText((Join-Path $taskRoot 'accounts-pending.flag'),'1');return}
   $taskDay=[TimeZoneInfo]::ConvertTimeBySystemTimeZoneId([DateTime]::UtcNow,'China Standard Time').ToString('yyyy-MM-dd')
   $taskSummaryPath=Join-Path $taskRoot ('accounts-'+$taskDay+'.json')
+  $taskAppliedPath=Join-Path $taskRoot ('accounts-applied-'+$taskDay+'.flag')
   # Catalog retries must not repeat today's already completed account check,
   # mutate credentials again, or generate another quota report every 15 minutes.
   $taskAccountsChecked=$false
   if(!$ResumeOnly -or !(Test-Path -LiteralPath $taskSummaryPath)){
+   if(Test-Path -LiteralPath $taskAppliedPath){Remove-Item -LiteralPath $taskAppliedPath}
    $null=Invoke-Maintenance 'accounts' @('-day',$taskDay);$taskAccountsChecked=$true
   }
   $taskSummary=Get-Content -Raw -Encoding UTF8 $taskSummaryPath|ConvertFrom-Json
   $taskCatalog=Invoke-Maintenance 'models'
-  if(($taskAccountsChecked -and $taskSummary.reload_required) -or $taskCatalog.reload_required){Restart-OwnedTask 'Cockpit-Account-Pool' 'C:\CodexStack\cockpit-gateway\1.3.65\cockpit-cliproxy.exe';if(!(Wait-ManagedHealth 'Cockpit gateway' 'C:\CodexStack\cockpit-gateway\1.3.65\cockpit-cliproxy.exe')){throw 'Refreshed pool health check failed'}}
+  # A prior attempt may have saved refreshed credentials before failing its
+  # catalog lookup or restart. Resume that reload once, without another report.
+  $taskNeedsReload=$taskSummary.reload_required -and ($taskAccountsChecked -or !(Test-Path -LiteralPath $taskAppliedPath))
+  if($taskNeedsReload -or $taskCatalog.reload_required){Restart-OwnedTask 'Cockpit-Account-Pool' 'C:\CodexStack\cockpit-gateway\1.3.65\cockpit-cliproxy.exe';if(!(Wait-ManagedHealth 'Cockpit gateway' 'C:\CodexStack\cockpit-gateway\1.3.65\cockpit-cliproxy.exe')){throw 'Refreshed pool health check failed'}}
+  [IO.File]::WriteAllText($taskAppliedPath,'1')
   if($taskCatalog.pending -gt 0){[IO.File]::WriteAllText((Join-Path $taskRoot 'accounts-pending.flag'),'1')}
   else{Remove-Item -LiteralPath (Join-Path $taskRoot 'accounts-pending.flag') -ErrorAction SilentlyContinue}
  }finally{$null=Lease 'release' $taskLease.lease}
