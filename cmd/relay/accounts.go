@@ -25,7 +25,7 @@ func accountUploadCommand(input string) string {
 	compact = strings.Trim(compact, "/。？?!！")
 	compact = strings.NewReplacer("帐号", "账号", "账户", "账号").Replace(compact)
 	switch compact {
-	case "上传账号", "账号上传":
+	case "上传账号", "账号上传", "管理账号", "账号管理":
 		return "upload"
 	case "上传账号状态", "账号上传状态":
 		return "status"
@@ -66,10 +66,14 @@ func accountMaintenanceLease(ctx context.Context, cfg config, key string, action
 	}
 	return result.Lease, nil
 }
-func accountReload(ctx context.Context, cfg config) error {
+func accountReload(ctx context.Context, cfg config, deletion bool) error {
 	runCtx, cancel := context.WithTimeout(ctx, 8*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(runCtx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", cfg.AccountReloadRunner, "-Root", cfg.CockpitRoot)
+	args := []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", cfg.AccountReloadRunner, "-Root", cfg.CockpitRoot}
+	if deletion {
+		args = append(args, "-SkipCatalog")
+	}
+	command := exec.CommandContext(runCtx, "powershell.exe", args...)
 	if command.Run() != nil {
 		return errors.New("account_pool_reload_failed")
 	}
@@ -96,7 +100,7 @@ func activateAccounts(ctx context.Context, cfg config, key string, store *accoun
 					unlock()
 					break
 				}
-				e = store.Process(id, cfg.CockpitRoot, func() error { return accountReload(ctx, cfg) })
+				e = store.Process(id, cfg.CockpitRoot, func() error { return accountReload(ctx, cfg, receipt.Operation == "delete") })
 				releaseCtx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 				_, releaseErr := accountMaintenanceLease(releaseCtx, cfg, key, "release", lease)
 				cancel()

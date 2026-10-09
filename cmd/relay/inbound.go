@@ -130,7 +130,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 			if e != nil {
 				return in.reply(ctx, msg, "accounts", "账号上传链接暂时不能生成，请稍后重试。")
 			}
-			return in.reply(ctx, msg, "accounts", "打开链接上传 Codex 账号 JSON（有效期 30 分钟）：\n"+in.publicURL+"accounts/#"+token+"\n已有账号更新，新账号添加。AI 任务执行中会先保存，任务结束后自动生效。无需 AI，不消耗模型 token。")
+			return in.reply(ctx, msg, "accounts", "打开链接管理 Codex 账号（有效期 30 分钟）：\n"+in.publicURL+"accounts/#"+token+"\n可上传 JSON、更新已有账号、添加新账号或手动删除账号。AI 任务执行中会先保存操作，任务结束后自动生效。无需 AI，不消耗模型 token。")
 		}
 		if accountCommand == "status" {
 			if in.accounts == nil {

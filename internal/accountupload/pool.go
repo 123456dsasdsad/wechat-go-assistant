@@ -16,6 +16,7 @@ import (
 type Summary struct {
 	Added   int `json:"added"`
 	Updated int `json:"updated"`
+	Deleted int `json:"deleted,omitempty"`
 	Total   int `json:"total"`
 }
 
@@ -311,6 +312,14 @@ func Merge(root, id string, accounts []Account) (Summary, error) {
 				value := text(key, "key")
 				if value == "" {
 					return sum, errors.New("pool_key_invalid")
+				}
+				if owned, _ := key["disabledByAccountDeletion"].(bool); owned {
+					key["enabled"] = true
+					delete(key, "disabledByAccountDeletion")
+					config["api-keys"], e = appendUnique(config["api-keys"], value)
+					if e != nil {
+						return sum, e
+					}
 				}
 				scopes[value], e = appendUnique(scopes[value], rid)
 				if e != nil {

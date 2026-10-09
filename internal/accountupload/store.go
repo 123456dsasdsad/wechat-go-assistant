@@ -17,10 +17,12 @@ import (
 )
 
 type Receipt struct {
-	ID         string `json:"id"`
-	Status     string `json:"status"`
-	Count      int    `json:"account_count"`
-	Duplicates int    `json:"duplicates"`
+	ID         string   `json:"id"`
+	Operation  string   `json:"operation,omitempty"`
+	AccountIDs []string `json:"account_ids,omitempty"`
+	Status     string   `json:"status"`
+	Count      int      `json:"account_count"`
+	Duplicates int      `json:"duplicates"`
 	Summary
 	Created   time.Time `json:"created"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -175,7 +177,12 @@ func (s *Store) Process(id, root string, reload func() error) error {
 		return errors.New("batch_not_pending")
 	}
 	if b.Status == "pending" {
-		sum, e := Merge(root, id, b.Accounts)
+		var sum Summary
+		if b.Operation == "delete" {
+			sum, e = Delete(root, id, b.AccountIDs)
+		} else {
+			sum, e = Merge(root, id, b.Accounts)
+		}
 		if e != nil {
 			b.Status = "failed"
 			b.Error = e.Error()
@@ -222,6 +229,23 @@ func (s *Store) Process(id, root string, reload func() error) error {
 	return nil
 }
 func (r Receipt) Text() string {
+	if r.Operation == "delete" {
+		label := "账号删除回执（程序处理，未调用 AI）\n"
+		id := r.ID
+		if len(id) > 8 {
+			id = id[:8]
+		}
+		switch r.Status {
+		case "pending":
+			return label + fmt.Sprintf("账号删除 %s：已接收 %d 个账号的删除请求，等待任务结束后生效。", id, r.Count)
+		case "applied":
+			return label + fmt.Sprintf("账号删除 %s：已移除 %d 个账号，等待网关重新加载。", id, r.Deleted)
+		case "active":
+			return label + fmt.Sprintf("账号删除 %s：已删除 %d 个账号，账号池剩余 %d 个，已生效。", id, r.Deleted, r.Total)
+		default:
+			return label + fmt.Sprintf("账号删除 %s：删除未完成，请刷新账号列表后重试。", id)
+		}
+	}
 	const label = "账号导入回执（程序处理，未调用 AI）\n"
 	id := r.ID
 	if len(id) > 8 {

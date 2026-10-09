@@ -339,7 +339,7 @@ func run(ctx context.Context) error {
 		publicHandler := handler
 		var accountHandler http.Handler
 		if accounts != nil {
-			accountHandler, err = accountupload.PublicHandler(accounts, cfg.PublicURL)
+			accountHandler, err = accountupload.PublicHandler(accounts, cfg.PublicURL, cfg.CockpitRoot)
 			if err != nil {
 				return err
 			}

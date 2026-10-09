@@ -12,7 +12,7 @@ import (
 
 func TestAccountUploadCommandNeverCreatesAIJobOrFileGrant(t *testing.T) {
 	defer metadb.CloseAll()
-	for _, command := range []string{"上传账号", "账号上传", "上传帐号", "帐号上传", "上传账户", "账户上传", " 上传 帐号。 ", "/上传帐号", "上传帐号！", "上传\n帐号", "上传　账户？"} {
+	for _, command := range []string{"管理账号", "账号管理", "管理帐号", "上传账号", "账号上传", "上传帐号", "帐号上传", "上传账户", "账户上传", " 上传 帐号。 ", "/上传帐号", "上传帐号！", "上传\n帐号", "上传　账户？"} {
 		t.Run(command, func(t *testing.T) { defer metadb.CloseAll(); checkAccountUploadCommand(t, command) })
 	}
 }

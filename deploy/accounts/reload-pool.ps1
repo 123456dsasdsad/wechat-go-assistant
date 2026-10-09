@@ -1,15 +1,19 @@
-param([Parameter(Mandatory=$true)][string]$Root)
+param([Parameter(Mandatory=$true)][string]$Root,[switch]$SkipCatalog)
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 $taskRoot=[IO.Path]::GetFullPath($Root).TrimEnd('\')
 $taskExpected='C:\CodexStack\cockpit-gateway\1.3.65\live'
 if($taskRoot -ne $taskExpected){throw 'account_pool_root_rejected'}
-$taskName='Cockpit-Account-Pool'
+$taskName='Cockpit-Account-Pool-20261006'
 $taskBinary='C:\CodexStack\cockpit-gateway\1.3.65\cockpit-cliproxy.exe'
 $taskKey=[IO.File]::ReadAllText((Join-Path $taskRoot 'client-key.txt')).Trim()
-$null=& C:\CodexStack\maintenance\maintenance.exe -config C:\CodexStack\maintenance\config.json -action models
-if($LASTEXITCODE -ne 0){throw 'account_model_catalog_pending'}
-$taskCatalog=Get-Content -Raw -Encoding UTF8 C:\CodexStack\maintenance\model-catalog-latest.json|ConvertFrom-Json
-if($taskCatalog.pending -gt 0){throw 'account_model_catalog_pending'}
+if(!$SkipCatalog){
+ $null=& C:\CodexStack\maintenance\maintenance.exe -config C:\CodexStack\maintenance\config.json -action models
+ if($LASTEXITCODE -ne 0){throw 'account_model_catalog_pending'}
+ $taskCatalog=Get-Content -Raw -Encoding UTF8 C:\CodexStack\maintenance\model-catalog-latest.json|ConvertFrom-Json
+ if($taskCatalog.pending -gt 0){throw 'account_model_catalog_pending'}
+}
+$taskManifest=Get-Content -Raw -Encoding UTF8 (Join-Path $taskRoot 'manifest.json')|ConvertFrom-Json
+$taskEmpty=@($taskManifest.accounts).Count -eq 0
 $taskReady=$false
 $null=Disable-ScheduledTask -TaskName $taskName
 try {
@@ -26,7 +30,7 @@ for($taskTry=0;$taskTry -lt 20;$taskTry++) {
  try {
   $taskResponse=Invoke-WebRequest 'http://127.0.0.1:17442/v1/models' -Headers @{Authorization=('Bearer '+$taskKey)} -UseBasicParsing -TimeoutSec 1
   if($taskResponse.StatusCode -eq 200){$taskReady=$true;break}
- }catch{}
+ }catch{if($taskEmpty -and $_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401){$taskReady=$true;break}}
 }
 if(!$taskReady){throw 'account_pool_reload_health_failed'}
 if(@(Get-Process|Where-Object{$_.Path -eq $taskBinary}).Count -ne 1){throw 'account_pool_instance_count_invalid'}

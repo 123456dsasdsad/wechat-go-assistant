@@ -78,7 +78,7 @@ func TestDedicatedUploadRequiresGrantAndOriginAndReturnsNoCredentials(t *testing
 	if e != nil {
 		t.Fatal(e)
 	}
-	handler, e := PublicHandler(store, "https://example.com/wechat-files/")
+	handler, e := PublicHandler(store, "https://example.com/wechat-files/", fixturePool(t))
 	if e != nil {
 		t.Fatal(e)
 	}

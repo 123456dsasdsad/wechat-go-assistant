@@ -55,7 +55,7 @@ func TestHelpParsingAndLookup(t *testing.T) {
 		t.Fatal("category lookup inconsistent", byName)
 	}
 	d := lookupCommands("", "账号 上传")
-	if len(d.Matches) != 2 || d.Matches[0].Syntax != "上传账号" || d.Matches[1].Syntax != "上传账号状态" {
+	if len(d.Matches) != 3 || d.Matches[0].Syntax != "上传账号" || d.Matches[1].Syntax != "管理账号" || d.Matches[2].Syntax != "上传账号状态" {
 		t.Fatal("keyword search did not narrow results", d.Matches)
 	}
 	d = lookupCommands("", "压缩包")
@@ -108,7 +108,7 @@ func TestWorkbenchCommandLookupIsAuthenticatedAndIndependentOfReplyToken(t *test
 		}
 		if w.Code == 200 {
 			var d helpDirectory
-			if e := json.Unmarshal(w.Body.Bytes(), &d); e != nil || len(d.Groups) != 12 || len(d.Matches) != 2 {
+			if e := json.Unmarshal(w.Body.Bytes(), &d); e != nil || len(d.Groups) != 12 || len(d.Matches) != 3 {
 				t.Fatal(d, e)
 			}
 		}
