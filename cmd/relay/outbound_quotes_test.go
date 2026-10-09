@@ -33,3 +33,21 @@ func TestAcceptedOutboundServerIDIsCachedWithoutLinkCredentials(t *testing.T) {
 		t.Fatal("client ID guessed to be server ID")
 	}
 }
+
+func TestOutboundWithoutServerIDMatchesOnlyCompleteAcceptedText(t *testing.T) {
+	defer metadb.CloseAll()
+	in := quoteFixture(t)
+	in.handle(context.Background(), textMessage("job", "原问题"))
+	j := in.queue.History()[0]
+	text := "任务 " + j.ID[:8] + "\n原问题：原问题\n结果链接 https://example.com/?token=private"
+	quoteRecorder(in.quotes, in.botID, in.queue)(weixin.Reply{ToUserID: in.owner, ClientID: "go-result-" + j.ID}, weixin.SendResult{}, text, false)
+	m := textMessage("quote", "补发这个")
+	m.Items[0].Ref = &weixin.RefMessage{Item: &weixin.Item{Type: weixin.TextType, Text: &weixin.TextItem{Text: text}}}
+	if c, ok := in.quotedContent(m); !ok || c.JobID != j.ID {
+		t.Fatal("complete accepted quote not bound", c, ok)
+	}
+	m.Items[0].Ref.Item.Text.Text = "原问题"
+	if _, ok := in.quotedContent(m); ok {
+		t.Fatal("partial summary guessed a task")
+	}
+}

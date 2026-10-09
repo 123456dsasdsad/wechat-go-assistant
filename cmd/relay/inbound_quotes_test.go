@@ -148,18 +148,18 @@ func TestMultipleInlineImageQuotesKeepDistinctAttachments(t *testing.T) {
 		t.Fatal("inline media sources collided", j)
 	}
 }
-func TestLongQuoteWithFourDirectFilesRepliesInsteadOfRetryingForever(t *testing.T) {
+func TestLongQuoteWithSixteenDirectFilesRepliesInsteadOfRetryingForever(t *testing.T) {
 	defer metadb.CloseAll()
 	in := quoteFixture(t)
 	m := textMessage("five", "分析这些资料")
 	m.Items[0].Ref = &weixin.RefMessage{Item: &weixin.Item{Type: weixin.TextType, Text: &weixin.TextItem{Text: strings.Repeat("长原文", 3000)}}}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 16; i++ {
 		m.Items = append(m.Items, weixin.Item{Type: weixin.FileType, File: &weixin.FileItem{Name: "资料.txt"}})
 	}
 	if e := in.handle(context.Background(), m); e != nil {
 		t.Fatal("permanent capacity failure caused drain retry", e)
 	}
-	if len(in.queue.History()) != 0 || !strings.Contains(in.client.(*fakeMessages).text, "最多 4 个") {
+	if len(in.queue.History()) != 0 || !strings.Contains(in.client.(*fakeMessages).text, "最多 16 个") {
 		t.Fatal("capacity failure was not explained")
 	}
 }

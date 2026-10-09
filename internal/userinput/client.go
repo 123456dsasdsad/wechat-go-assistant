@@ -15,6 +15,7 @@ import (
 
 type Connection struct {
 	URL, Key, JobID, Lease, Executable string
+	PermitURL, PermitKey               string
 }
 type envelope struct {
 	ID         string  `json:"id"`
@@ -74,6 +75,7 @@ func (c Connection) Wait(ctx context.Context, r Request) (Response, error) {
 	}
 	v := envelope{ID: c.JobID, Lease: c.Lease, Request: r}
 	path := "/jobs/questions/publish"
+	paused := false
 	for {
 		q, status, e := c.call(ctx, path, v)
 		if e != nil {
@@ -101,6 +103,12 @@ func (c Connection) Wait(ctx context.Context, r Request) (Response, error) {
 					return Response{}, errors.New("incomplete_user_answers")
 				}
 			}
+			if paused {
+				if e = c.permit(ctx, "resume", r.ID); e != nil {
+					return Response{}, e
+				}
+				paused = false
+			}
 			for {
 				_, status, e = c.call(ctx, "/jobs/questions/resolve", v)
 				if e == nil {
@@ -116,6 +124,12 @@ func (c Connection) Wait(ctx context.Context, r Request) (Response, error) {
 		}
 		if q.State != "pending" {
 			return Response{}, errors.New("user_question_canceled")
+		}
+		if !paused && c.PermitURL != "" {
+			if e = c.permit(ctx, "pause", r.ID); e != nil {
+				return Response{}, e
+			}
+			paused = true
 		}
 		if e = delay(ctx); e != nil {
 			return Response{}, e

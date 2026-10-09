@@ -17,13 +17,13 @@ func questionArgs(c *userinput.Connection) []string {
 	if c == nil {
 		return nil
 	}
-	return []string{"-c", "mcp_servers.wechat_questions.command=" + strconv.Quote(c.Executable), "-c", `mcp_servers.wechat_questions.args=["--question-mcp"]`, "-c", `mcp_servers.wechat_questions.env_vars=["WECHAT_QUESTION_URL","WECHAT_QUESTION_KEY","WECHAT_QUESTION_JOB","WECHAT_QUESTION_LEASE"]`, "-c", "mcp_servers.wechat_questions.tool_timeout_sec=43200", "-c", "mcp_servers.wechat_questions.required=true"}
+	return []string{"-c", "mcp_servers.wechat_questions.command=" + strconv.Quote(c.Executable), "-c", `mcp_servers.wechat_questions.args=["--question-mcp"]`, "-c", `mcp_servers.wechat_questions.env_vars=["WECHAT_QUESTION_URL","WECHAT_QUESTION_KEY","WECHAT_QUESTION_JOB","WECHAT_QUESTION_LEASE","WECHAT_QUESTION_PERMIT_URL","WECHAT_QUESTION_PERMIT_KEY"]`, "-c", "mcp_servers.wechat_questions.tool_timeout_sec=43200", "-c", "mcp_servers.wechat_questions.required=true"}
 }
 func questionEnv(c *userinput.Connection) []string {
 	if c == nil {
 		return nil
 	}
-	return []string{"WECHAT_QUESTION_URL=" + c.URL, "WECHAT_QUESTION_KEY=" + c.Key, "WECHAT_QUESTION_JOB=" + c.JobID, "WECHAT_QUESTION_LEASE=" + c.Lease}
+	return []string{"WECHAT_QUESTION_URL=" + c.URL, "WECHAT_QUESTION_KEY=" + c.Key, "WECHAT_QUESTION_JOB=" + c.JobID, "WECHAT_QUESTION_LEASE=" + c.Lease, "WECHAT_QUESTION_PERMIT_URL=" + c.PermitURL, "WECHAT_QUESTION_PERMIT_KEY=" + c.PermitKey}
 }
 
 type nativeQuestion struct {

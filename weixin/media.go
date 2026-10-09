@@ -137,8 +137,16 @@ func (c *Client) Download(ctx context.Context, item Item) ([]byte, error) {
 	case item.Type == FileType && item.File != nil:
 		media = item.File.Media
 		expectedMD5, expectedSize = item.File.MD5, item.File.Length
+	case item.Type == VoiceType && item.Voice != nil:
+		media = item.Voice.Media
+	case item.Type == VideoType && item.Video != nil:
+		media = item.Video.Media
+		expectedMD5 = item.Video.MD5
+		if item.Video.Size > 0 {
+			expectedSize = strconv.FormatInt(item.Video.Size, 10)
+		}
 	default:
-		return nil, errors.New("only image and file downloads are supported")
+		return nil, errors.New("unsupported media download")
 	}
 	if media == nil {
 		return nil, errors.New("message has no media reference")
@@ -149,7 +157,7 @@ func (c *Client) Download(ctx context.Context, item Item) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if item.Type == FileType && key == nil {
+	if item.Type != ImageType && key == nil {
 		return nil, errors.New("file is missing encryption key")
 	}
 	if expectedSize != "" {

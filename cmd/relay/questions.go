@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -41,6 +40,9 @@ func (in *inbound) answerUserQuestion(ctx context.Context, msg weixin.Message, i
 			id = string(item.Ref.Item.MsgID)
 		}
 		j, b, i, ok := in.queue.FindQuotedQuestion(msg.FromUserID, id)
+		if !ok && item.Ref.Item != nil && item.Ref.Item.Text != nil {
+			j, b, i, ok = in.queue.FindQuotedQuestion(msg.FromUserID, quoteTextKey(item.Ref.Item.Text.Text))
+		}
 		if !ok {
 			continue
 		}
@@ -111,10 +113,16 @@ func deliverUserQuestion(ctx context.Context, client messageClient, store *jobs.
 	if e != nil {
 		return e
 	}
-	if r.MessageID == "" {
-		return errors.New("question_message_id_missing")
+	// Some iLink responses accept the text without returning a server ID. Bind
+	// the complete accepted prompt so it is not resent and its quote still works.
+	for _, id := range []string{string(r.MessageID), quoteTextKey(userQuestionText(j, b, index))} {
+		if id != "" {
+			if e := store.RecordQuestionMessage(j.ID, b.ID, qid, id); e != nil {
+				return e
+			}
+		}
 	}
-	return store.RecordQuestionMessage(j.ID, b.ID, qid, string(r.MessageID))
+	return nil
 }
 func deliverUserQuestions(ctx context.Context, client *liveResultSender, store *jobs.Store) {
 	backoff := map[string]deliveryBackoff{}

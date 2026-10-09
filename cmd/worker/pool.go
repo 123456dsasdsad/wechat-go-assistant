@@ -21,6 +21,12 @@ func runWorkerPool(parent context.Context, slots int, loop func(context.Context)
 	if slots < 1 || slots > 16 {
 		return errors.New("invalid_worker_parallelism")
 	}
+	return runElasticWorkerPool(parent, slots, loop)
+}
+func runElasticWorkerPool(parent context.Context, slots int, loop func(context.Context) error) error {
+	if slots < 1 || slots > 48 {
+		return errors.New("invalid_worker_pool_capacity")
+	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	results := make(chan error, slots)

@@ -10,5 +10,6 @@
   "permissions": ":danger-full-access",
   "turn_timeout_seconds": 43200,
   "max_concurrent_tasks": 4,
-  "live_steering": true
+  "live_steering": true,
+  "max_waiting_tasks": 8
 }

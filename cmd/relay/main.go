@@ -13,8 +13,10 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/library"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/maintenance"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/materials"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/personalwechat"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/quotes"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/settings"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/watches"
@@ -30,23 +32,25 @@ import (
 )
 
 type config struct {
-	StatePath           string `json:"state_path"`
-	JobsDir             string `json:"jobs_dir"`
-	KeyFile             string `json:"key_file"`
-	Listen              string `json:"listen"`
-	ModelsFile          string `json:"models_file"`
-	SettingsFile        string `json:"settings_file"`
-	FilesDir            string `json:"files_dir"`
-	UploadListen        string `json:"upload_listen"`
-	PublicURL           string `json:"public_url"`
-	ConversationsFile   string `json:"conversations_file"`
-	OutputsDir          string `json:"outputs_dir"`
-	MaintenanceDir      string `json:"maintenance_dir,omitempty"`
-	CockpitRoot         string `json:"cockpit_root,omitempty"`
-	AccountsDir         string `json:"accounts_dir,omitempty"`
-	AccountReloadRunner string `json:"account_reload_runner,omitempty"`
-	LibraryURL          string `json:"library_url,omitempty"`
-	LibraryDraftsDir    string `json:"library_drafts_dir,omitempty"`
+	StatePath           string                `json:"state_path"`
+	JobsDir             string                `json:"jobs_dir"`
+	KeyFile             string                `json:"key_file"`
+	Listen              string                `json:"listen"`
+	ModelsFile          string                `json:"models_file"`
+	SettingsFile        string                `json:"settings_file"`
+	FilesDir            string                `json:"files_dir"`
+	UploadListen        string                `json:"upload_listen"`
+	PublicURL           string                `json:"public_url"`
+	ConversationsFile   string                `json:"conversations_file"`
+	OutputsDir          string                `json:"outputs_dir"`
+	MaintenanceDir      string                `json:"maintenance_dir,omitempty"`
+	CockpitRoot         string                `json:"cockpit_root,omitempty"`
+	AccountsDir         string                `json:"accounts_dir,omitempty"`
+	AccountReloadRunner string                `json:"account_reload_runner,omitempty"`
+	LibraryURL          string                `json:"library_url,omitempty"`
+	LibraryDraftsDir    string                `json:"library_drafts_dir,omitempty"`
+	Transport           string                `json:"transport,omitempty"`
+	PersonalWeChat      personalwechat.Config `json:"personal_wechat,omitempty"`
 }
 
 func main() {
@@ -108,7 +112,17 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return errors.New("wechat_authorization_unreadable")
 	}
-	client, err := weixin.New(weixin.Options{BaseURL: state.Account.BaseURL, Token: state.Account.BotToken})
+	var client relayTransport
+	if cfg.Transport == "" || cfg.Transport == "ilink" {
+		client, err = weixin.New(weixin.Options{BaseURL: state.Account.BaseURL, Token: state.Account.BotToken})
+	} else if cfg.Transport == "personal" {
+		if cfg.PersonalWeChat.OwnerAlias != state.Account.OwnerID {
+			return errors.New("personal_owner_mismatch")
+		}
+		client, err = personalwechat.New(ctx, cfg.PersonalWeChat)
+	} else {
+		return errors.New("unsupported_transport")
+	}
 	if err != nil {
 		return err
 	}
@@ -224,6 +238,11 @@ func run(ctx context.Context) error {
 		return err
 	}
 	in := &inbound{templates: templates, assistant: assistantStore, client: outbound, preferences: preferences, queue: store, files: fileStore, outputs: outputStore, publicURL: cfg.PublicURL, owner: state.Account.OwnerID, sessions: sessions, reports: reports, accounts: accounts, quotes: quoteStore, botID: state.Account.BotID}
+	in.materials, err = materials.Open(filepath.Join(filepath.Dir(cfg.JobsDir), "materials"))
+	if err != nil {
+		return err
+	}
+	defer in.materials.Close()
 	in.watches, err = watches.Open(filepath.Join(filepath.Dir(cfg.JobsDir), "external-watches.json"))
 	if err != nil {
 		return err

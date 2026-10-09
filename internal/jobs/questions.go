@@ -116,7 +116,8 @@ func QuestionCode(batch UserQuestion, index int) string {
 	return fmt.Sprintf("%s-%d", batch.ID[:8], index+1)
 }
 
-// FindQuotedQuestion resolves only IDs actually returned by WeChat for this owner.
+// FindQuotedQuestion resolves IDs or full-text hashes durably recorded after
+// WeChat accepted the prompt for this owner.
 // Completed questions are also returned so quoting an old prompt cannot create a new task.
 func (s *Store) FindQuotedQuestion(owner, messageID string) (Job, UserQuestion, int, bool) {
 	s.mu.Lock()

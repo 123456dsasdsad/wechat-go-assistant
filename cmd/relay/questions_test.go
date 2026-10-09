@@ -105,3 +105,30 @@ func TestAcceptedQuestionIDBindsBeforeSendReturnsEvenWithoutQuoteCache(t *testin
 		t.Fatal("foreign delivery bound to owner")
 	}
 }
+
+type noIDQuestionClient struct{ fakeMessages }
+
+func (*noIDQuestionClient) SendText(context.Context, weixin.Reply, string) (weixin.SendResult, error) {
+	return weixin.SendResult{}, nil
+}
+
+func TestAcceptedQuestionWithoutServerIDCanBeAnsweredByFullQuote(t *testing.T) {
+	defer metadb.CloseAll()
+	in, j, b := pendingQuestionFixture(t)
+	if e := deliverUserQuestion(context.Background(), &noIDQuestionClient{}, in.queue, j, b, 0); e != nil {
+		t.Fatal(e)
+	}
+	prompt := userQuestionText(j, b, 0)
+	if _, _, _, ok := in.queue.FindQuotedQuestion(j.Owner, quoteTextKey(prompt[:20])); ok {
+		t.Fatal("partial prompt matched")
+	}
+	m := textMessage("answer-without-id", "2")
+	m.Items[0].Ref = &weixin.RefMessage{Item: &weixin.Item{Type: weixin.TextType, Text: &weixin.TextItem{Text: prompt}}}
+	if e := in.handle(context.Background(), m); e != nil {
+		t.Fatal(e)
+	}
+	saved, _ := in.queue.Snapshot(j.ID)
+	if saved.Questions[0].Answers["format"].Answers[0] != "SVG" || len(in.queue.History()) != 1 {
+		t.Fatal("answer lost or created a task", saved)
+	}
+}

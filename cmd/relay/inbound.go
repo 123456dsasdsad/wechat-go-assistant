@@ -11,6 +11,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/library"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/maintenance"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/materials"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/quotes"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/settings"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/watches"
@@ -45,6 +46,7 @@ type inbound struct {
 	library          *library.Client
 	libraryDrafts    *library.Store
 	watches          *watches.Store
+	materials        *materials.Store
 }
 
 var statusQuestion = regexp.MustCompile(`^(?:现在)?(?:任务|训练|长期训练|跑完长期训练)(?:进度|的结果在哪|完成了吗|跑完了吗|进行到哪了|怎么样了)$`)
@@ -75,16 +77,45 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 			media = append(media, item)
 		case item.Type == weixin.ImageType && item.Image != nil:
 			media = append(media, item)
+		case item.Type == weixin.VoiceType && item.Voice != nil:
+			if item.Voice.Text != "" {
+				texts = append(texts, item.Voice.Text)
+			}
+			if item.Voice.Media != nil {
+				media = append(media, item)
+			}
+		case item.Type == weixin.VideoType && item.Video != nil:
+			media = append(media, item)
 		default:
 			unsupported = true
 		}
 	}
 	input := strings.TrimSpace(strings.Join(texts, "\n"))
+	if len(msg.Sources) > 0 && in.materials != nil {
+		p, active, e := in.materials.Active(msg.FromUserID)
+		if e != nil {
+			return e
+		}
+		if !active {
+			p, e = in.materials.Begin(msg.FromUserID, msg.Key(), "转发材料 "+time.Now().Format("01-02 15:04"), in.sessions.Current().ID)
+			if e != nil {
+				return e
+			}
+		}
+		p, e = in.captureMaterial(ctx, msg, p, input, nil, media)
+		if e != nil {
+			return in.reply(ctx, msg, "materials", e.Error())
+		}
+		return in.reply(ctx, msg, "materials", in.materialReply(p))
+	}
 	in.rememberIncoming(msg, nil)
-	if len(input) > 8192 || len(media) > 4 {
-		return in.reply(ctx, msg, "input", "文字请控制在 8 KiB 内，每个任务最多 4 个文件。")
+	if len(input) > materials.MaxTextBytes || len(media) > 16 {
+		return in.reply(ctx, msg, "input", "单条材料文字最多 2 MiB、附件最多 16 个；更多资料请分条收集。")
 	}
 	if handled, e := in.answerUserQuestion(ctx, msg, input, len(media)); handled {
+		return e
+	}
+	if handled, e := in.quotedOperation(ctx, msg, input); handled {
 		return e
 	}
 	if unsupported {
@@ -94,8 +125,14 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	if quoteErr != nil {
 		return in.reply(ctx, msg, "quote", quoteErr.Error())
 	}
-	if len(refs)+len(media) > 4 {
-		return in.reply(ctx, msg, "quote", "本条消息与引用资料合计最多 4 个文件，请分次发送。")
+	if handled, e := in.materialCommand(ctx, msg, input, material, refs, media); handled {
+		return e
+	}
+	if len(input) > 8192 || len(refs)+len(media) > 16 {
+		return in.reply(ctx, msg, "input", "任务要求请控制在 8 KiB 内、附件最多 16 个；长聊天请先发送“开始收集 名称”。")
+	}
+	if handled, e := in.projectCommand(ctx, msg, input); handled {
+		return e
 	}
 	if handled, e := in.libraryCommand(ctx, msg, input, material, refs, media); handled {
 		return e
@@ -274,15 +311,19 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		if e != nil {
 			return in.reply(ctx, msg, "quote", e.Error())
 		}
-		if len(refs)+len(media) > 4 {
-			return in.reply(ctx, msg, "quote", "长引用需要一个文本附件。本条消息与引用资料合计最多 4 个文件，请减少附件后重发。")
+		if len(refs)+len(media) > 16 {
+			return in.reply(ctx, msg, "quote", "长引用需要一个文本附件。资料合计最多 16 个文件，请减少附件后重发。")
 		}
 	}
 	if body, ok := supplementText(input); ok && len(media) == 0 && len(refs) == 0 {
 		if body == "" {
 			return in.reply(ctx, msg, "steer", "请发送“补充：你的追加要求”。")
 		}
-		j, v, active, e := in.queue.SupplementMessage(msg.Key(), body, msg.FromUserID, msg.ContextToken, in.sessions.Current().ID, in.preferences.Current(in.sessions.Current().ID))
+		cid := in.quotedConversation(msg)
+		if cid == "" {
+			cid = in.sessions.Current().ID
+		}
+		j, v, active, e := in.queue.SupplementMessage(msg.Key(), body, msg.FromUserID, msg.ContextToken, cid, in.preferences.Current(cid))
 		if e != nil {
 			return in.reply(ctx, msg, "steer", "补充未保存，请稍后重试或发送普通消息排队。")
 		}
@@ -311,6 +352,11 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 				return in.reply(ctx, msg, "files", "图片格式无法读取，请发送 PNG/JPEG 图片，或通过“上传文件”上传。")
 			}
 			name = fmt.Sprintf("微信图片-%d.%s", i+1, format)
+		} else if item.Type == weixin.VoiceType || item.Type == weixin.VideoType {
+			name, data, err = voiceMedia(item, data, i)
+			if err != nil {
+				return in.reply(ctx, msg, "files", err.Error())
+			}
 		} else {
 			name = item.File.Name
 		}
@@ -323,11 +369,20 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	in.rememberIncoming(msg, refs[directStart:])
 	if input == "" && len(refs) > 0 {
 		input = "请读取收到的文件，概述主要内容，并列出可以继续分析的事项。"
+		for _, m := range media {
+			if m.Type == weixin.VoiceType {
+				input = "请读取这条语音的本地转写，按我的语音要求处理。识别不清楚时询问我，不要猜测缺失内容。"
+			}
+		}
 	}
 	if input == "" {
 		return in.reply(ctx, msg, "input", "请发送文字任务，或发送“上传文件”获取文件入口。")
 	}
-	choice, body, err := in.preferences.ChoiceForTask(input, in.sessions.Current().ID)
+	taskCID := in.quotedConversation(msg)
+	if taskCID == "" {
+		taskCID = in.sessions.Current().ID
+	}
+	choice, body, err := in.preferences.ChoiceForTask(input, taskCID)
 	if err != nil {
 		return in.reply(ctx, msg, "input", "临时型号无效或格式不正确。发送“模型列表”查看可选项。")
 	}
@@ -338,7 +393,10 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 			return in.reply(ctx, msg, "files", "未找到所选文件。发送“文件列表”查看文件，或发送“上传文件”重新上传。")
 		}
 	}
-	session := in.sessions.Current()
+	session, sessionOK := in.sessions.Get(taskCID)
+	if !sessionOK || session.Archived {
+		return in.reply(ctx, msg, "input", "引用对应的会话已归档或不存在，请恢复会话后再试。")
+	}
 	memory := ""
 	if in.assistant != nil {
 		memory = in.assistant.MemoryText(msg.FromUserID)

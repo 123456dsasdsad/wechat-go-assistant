@@ -16,6 +16,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/library"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/userinput"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/workerpermits"
 	"io"
 	"net"
 	"net/http"
@@ -29,26 +30,30 @@ import (
 )
 
 type config struct {
-	ConfigPath         string `json:"-"`
-	RelayURL           string `json:"relay_url"`
-	RelayKeyFile       string `json:"relay_key_file"`
-	APIKeyFile         string `json:"api_key_file"`
-	CodexBinary        string `json:"codex_binary"`
-	CodexHome          string `json:"codex_home"`
-	WorkRoot           string `json:"work_root"`
-	ModelsFile         string `json:"models_file"`
-	ThreadsFile        string `json:"threads_file"`
-	Permissions        string `json:"permissions"`
-	TurnTimeoutSeconds int    `json:"turn_timeout_seconds"`
-	PythonBinary       string `json:"python_binary,omitempty"`
-	LiveSteering       bool   `json:"live_steering,omitempty"`
-	MaxConcurrentTasks int    `json:"max_concurrent_tasks,omitempty"`
-	LibraryRoot        string `json:"library_root,omitempty"`
-	LibraryListen      string `json:"library_listen,omitempty"`
-	LibraryOwner       string `json:"library_owner,omitempty"`
-	ScholarProxy       string `json:"scholar_proxy,omitempty"`
-	ScholarKeysFile    string `json:"scholar_keys_file,omitempty"`
-	library            *library.Store
+	ConfigPath                  string `json:"-"`
+	RelayURL                    string `json:"relay_url"`
+	RelayKeyFile                string `json:"relay_key_file"`
+	APIKeyFile                  string `json:"api_key_file"`
+	CodexBinary                 string `json:"codex_binary"`
+	CodexHome                   string `json:"codex_home"`
+	WorkRoot                    string `json:"work_root"`
+	ModelsFile                  string `json:"models_file"`
+	ThreadsFile                 string `json:"threads_file"`
+	Permissions                 string `json:"permissions"`
+	TurnTimeoutSeconds          int    `json:"turn_timeout_seconds"`
+	PythonBinary                string `json:"python_binary,omitempty"`
+	LiveSteering                bool   `json:"live_steering,omitempty"`
+	MaxConcurrentTasks          int    `json:"max_concurrent_tasks,omitempty"`
+	LibraryRoot                 string `json:"library_root,omitempty"`
+	LibraryListen               string `json:"library_listen,omitempty"`
+	LibraryOwner                string `json:"library_owner,omitempty"`
+	ScholarProxy                string `json:"scholar_proxy,omitempty"`
+	ScholarKeysFile             string `json:"scholar_keys_file,omitempty"`
+	library                     *library.Store
+	permits                     *workerpermits.Pool
+	MaxWaitingTasks             int    `json:"max_waiting_tasks,omitempty"`
+	TranscriptionCommand        string `json:"transcription_command,omitempty"`
+	TranscriptionTimeoutSeconds int    `json:"transcription_timeout_seconds,omitempty"`
 }
 
 func main() {
@@ -92,7 +97,7 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--question-mcp" {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
-		connection := userinput.Connection{URL: os.Getenv("WECHAT_QUESTION_URL"), Key: os.Getenv("WECHAT_QUESTION_KEY"), JobID: os.Getenv("WECHAT_QUESTION_JOB"), Lease: os.Getenv("WECHAT_QUESTION_LEASE")}
+		connection := userinput.Connection{URL: os.Getenv("WECHAT_QUESTION_URL"), Key: os.Getenv("WECHAT_QUESTION_KEY"), JobID: os.Getenv("WECHAT_QUESTION_JOB"), Lease: os.Getenv("WECHAT_QUESTION_LEASE"), PermitURL: os.Getenv("WECHAT_QUESTION_PERMIT_URL"), PermitKey: os.Getenv("WECHAT_QUESTION_PERMIT_KEY")}
 		if !connection.Valid() {
 			fmt.Fprintln(os.Stderr, "invalid_question_connection")
 			os.Exit(1)
@@ -187,7 +192,19 @@ func run(ctx context.Context) error {
 	fmt.Printf("{\"type\":\"worker_ready\",\"models\":%d,\"max_concurrent_tasks\":%d}\n", len(catalog.Models), cfg.MaxConcurrentTasks)
 	go trainingManager(ctx, cfg, relayKey)
 	go replayOutbox(ctx, cfg, relayKey)
-	return runWorkerPool(ctx, cfg.MaxConcurrentTasks, func(loopCtx context.Context) error {
+	if cfg.MaxWaitingTasks == 0 {
+		cfg.MaxWaitingTasks = 8
+	}
+	if cfg.MaxWaitingTasks < 1 || cfg.MaxWaitingTasks > 32 {
+		return errors.New("invalid_waiting_task_capacity")
+	}
+	cfg.permits = workerpermits.New(cfg.MaxConcurrentTasks)
+	stopPermits, e := cfg.permits.Start(ctx)
+	if e != nil {
+		return e
+	}
+	defer stopPermits()
+	return runElasticWorkerPool(ctx, cfg.MaxConcurrentTasks+cfg.MaxWaitingTasks, func(loopCtx context.Context) error {
 		return workerLoop(loopCtx, cfg, catalog, threads, relayKey, apiKey)
 	})
 }
@@ -227,7 +244,11 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 		return res.StatusCode, nil
 	}
 	var finishLease context.CancelFunc
+	var executionPermit *workerpermits.Ticket
 	defer func() {
+		if executionPermit != nil {
+			executionPermit.Release()
+		}
 		if finishLease != nil {
 			finishLease()
 		}
@@ -240,16 +261,36 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 			finishLease()
 			finishLease = nil
 		}
+		if executionPermit != nil {
+			executionPermit.Release()
+			executionPermit = nil
+		}
+		if cfg.permits != nil {
+			var permitErr error
+			executionPermit, permitErr = cfg.permits.Acquire(ctx)
+			if permitErr != nil {
+				return nil
+			}
+		}
 		var task jobs.Task
 		status, e := call("/jobs/claim", nil, &task)
 		if ctx.Err() != nil {
 			return nil
 		}
 		if e != nil || status == 204 {
+			if executionPermit != nil {
+				executionPermit.Release()
+				executionPermit = nil
+			}
 			if !pause(ctx, 2*time.Second) {
 				return nil
 			}
 			continue
+		}
+		if executionPermit != nil {
+			if e = executionPermit.Bind(task.ID, task.Lease); e != nil {
+				return e
+			}
 		}
 		if len(task.ID) != 24 || len(task.Input) > 8192 {
 			return errors.New("unsupported_worker_task")
@@ -288,7 +329,7 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 				continue
 			}
 		}
-		if len(task.Attachments) > 4 {
+		if len(task.Attachments) > 16 {
 			return errors.New("unsupported_worker_attachments")
 		}
 		for _, ref := range task.Attachments {
@@ -364,6 +405,16 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 				path = filepath.ToSlash(filepath.Join("turns", task.ID, path))
 			}
 			inputs = append(inputs, map[string]string{"name": ref.Name, "path": path})
+			if audioInput(ref.Name) {
+				// Prepare returns the attachment directory, not its original file.
+				audioPath := filepath.ToSlash(filepath.Join(path, "original", ref.Name))
+				transcripts, err := transcribeInput(taskCtx, cfg, conversationDir, audioPath)
+				if err != nil {
+					inputErr = err
+					break
+				}
+				inputs = append(inputs, transcripts...)
+			}
 		}
 		if inputErr != nil {
 			if ctx.Err() != nil {
@@ -404,6 +455,10 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 			return errors.New("worker_executable_unavailable")
 		}
 		questions := &userinput.Connection{URL: cfg.RelayURL, Key: relayKey, JobID: task.ID, Lease: task.Lease, Executable: workerBinary}
+		if cfg.permits != nil {
+			questions.PermitURL = cfg.permits.URL
+			questions.PermitKey = cfg.permits.Key
+		}
 		progress := newRelayProgress(taskCtx, cfg.RelayURL, relayKey, task)
 		result, runErr := codex.Run(runCtx, codex.Config{Binary: cfg.CodexBinary, Home: cfg.CodexHome, Directory: conversationDir, Key: apiKey, Model: task.Model, Effort: task.Effort, Persistent: task.ConversationID != "", ThreadID: nativeThread, Permissions: cfg.Permissions, AppServer: cfg.LiveSteering, Steering: steering, Questions: questions, QuestionMCP: questions, UsageBaseline: threads.Usage(task.ConversationID), Progress: progress.Publish}, prompt)
 		progress.Close()

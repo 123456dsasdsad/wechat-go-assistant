@@ -15,7 +15,9 @@ const (
 	ProtocolVersion = "2.4.9" // Wire compatibility reference, not this program's version.
 	TextType        = 1
 	ImageType       = 2
+	VoiceType       = 3
 	FileType        = 4
+	VideoType       = 5
 	UploadImage     = 1
 	UploadFile      = 3
 )
@@ -75,6 +77,20 @@ type FileItem struct {
 	MD5    string `json:"md5,omitempty"`
 	Length string `json:"len,omitempty"`
 }
+type VoiceItem struct {
+	Media         *Media `json:"media,omitempty"`
+	EncodeType    int    `json:"encode_type,omitempty"`
+	BitsPerSample int    `json:"bits_per_sample,omitempty"`
+	SampleRate    int    `json:"sample_rate,omitempty"`
+	Playtime      int    `json:"playtime,omitempty"`
+	Text          string `json:"text,omitempty"`
+}
+type VideoItem struct {
+	Media  *Media `json:"media,omitempty"`
+	Size   int64  `json:"video_size,omitempty"`
+	Length int    `json:"play_length,omitempty"`
+	MD5    string `json:"video_md5,omitempty"`
+}
 type Item struct {
 	Type  int         `json:"type"`
 	MsgID ID          `json:"msg_id,omitempty"`
@@ -82,6 +98,8 @@ type Item struct {
 	Text  *TextItem   `json:"text_item,omitempty"`
 	Image *ImageItem  `json:"image_item,omitempty"`
 	File  *FileItem   `json:"file_item,omitempty"`
+	Voice *VoiceItem  `json:"voice_item,omitempty"`
+	Video *VideoItem  `json:"video_item,omitempty"`
 }
 
 // RefMessage can contain the original item, a summary, or only a server ID.
@@ -101,18 +119,19 @@ type PartialText struct {
 }
 
 type Message struct {
-	MessageID    ID     `json:"message_id,omitempty"`
-	FromUserID   string `json:"from_user_id"`
-	ToUserID     string `json:"to_user_id,omitempty"`
-	ClientID     string `json:"client_id,omitempty"`
-	Type         int    `json:"message_type"`
-	State        int    `json:"message_state,omitempty"`
-	Items        []Item `json:"item_list,omitempty"`
-	ContextToken string `json:"context_token,omitempty"`
-	SessionID    string `json:"session_id,omitempty"`
-	GroupID      string `json:"group_id,omitempty"`
-	RunID        string `json:"run_id,omitempty"`
-	CreatedAt    int64  `json:"create_time_ms,omitempty"`
+	MessageID    ID       `json:"message_id,omitempty"`
+	FromUserID   string   `json:"from_user_id"`
+	ToUserID     string   `json:"to_user_id,omitempty"`
+	ClientID     string   `json:"client_id,omitempty"`
+	Type         int      `json:"message_type"`
+	State        int      `json:"message_state,omitempty"`
+	Items        []Item   `json:"item_list,omitempty"`
+	ContextToken string   `json:"context_token,omitempty"`
+	SessionID    string   `json:"session_id,omitempty"`
+	GroupID      string   `json:"group_id,omitempty"`
+	RunID        string   `json:"run_id,omitempty"`
+	CreatedAt    int64    `json:"create_time_ms,omitempty"`
+	Sources      []Source `json:"normalized_sources,omitempty"`
 }
 
 func (m Message) Key() string {

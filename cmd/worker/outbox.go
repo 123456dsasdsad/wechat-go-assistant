@@ -43,6 +43,9 @@ func resultPath(cfg config, v resultOutbox) string {
 func queueResult(cfg config, task jobs.Task, c jobs.Completion, dir string) (resultOutbox, error) {
 	v := resultOutbox{Task: task, Completion: c, Directory: dir}
 	if c.Error == "" {
+		if e := registerActionOutputs(task, dir); e != nil {
+			return v, e
+		}
 		entries, e := artifacts.Read(dir)
 		if e != nil {
 			return v, e

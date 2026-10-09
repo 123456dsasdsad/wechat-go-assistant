@@ -240,7 +240,7 @@ func (in *inbound) workspaceSnapshot(owner, query string, archived bool) (map[st
 				}
 			}
 		}
-		tasks = append(tasks, map[string]any{"id": j.ID, "conversation": j.ConversationID, "input": shortPreview(j.Input, 180), "status": taskStatusLabel(j), "state": j.Status, "created": j.Created, "error": j.Error, "progress": tailText(j.Progress, 12000), "result": shortPreview(j.Result, 2000), "model": j.Model, "effort": j.Effort, "files": j.Outputs, "questions": qs, "link": link, "usage": j.Usage, "usd": cost, "priced": priced, "cancelling": j.CancelRequested, "budget_reached": j.BudgetReached, "budget_usd": j.BudgetUSD, "training": j.Training})
+		tasks = append(tasks, map[string]any{"delivery": deliverySummary(j), "id": j.ID, "conversation": j.ConversationID, "input": shortPreview(j.Input, 180), "status": taskStatusLabel(j), "state": j.Status, "created": j.Created, "error": j.Error, "progress": tailText(j.Progress, 12000), "result": shortPreview(j.Result, 2000), "model": j.Model, "effort": j.Effort, "files": j.Outputs, "questions": qs, "link": link, "usage": j.Usage, "usd": cost, "priced": priced, "cancelling": j.CancelRequested, "budget_reached": j.BudgetReached, "budget_usd": j.BudgetUSD, "training": j.Training})
 	}
 	current := in.sessions.Current()
 	total, byConversation, e := in.queue.UsageByConversation(owner)
@@ -266,6 +266,22 @@ func (in *inbound) workspaceSnapshot(owner, query string, archived bool) (map[st
 		data["accounts"] = in.reports.Latest("accounts")
 		data["updates"] = in.reports.Latest("updates")
 	}
+	if in.materials != nil {
+		packs, e := in.materials.List(owner)
+		if e != nil {
+			return nil, e
+		}
+		projects, e := in.materials.Projects(owner)
+		if e != nil {
+			return nil, e
+		}
+		summaries := []map[string]any{}
+		for _, p := range packs {
+			summaries = append(summaries, map[string]any{"id": p.ID, "title": p.Title, "state": p.State, "conversation": p.Conversation, "project": p.Project, "count": len(p.Entries), "job_id": p.JobID, "updated": p.Updated})
+		}
+		data["materials"] = summaries
+		data["projects"] = projects
+	}
 	return data, nil
 }
 func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath string) (any, error) {
@@ -279,6 +295,9 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 			return nil, errors.New("reply_context_unavailable")
 		}
 		reply = s.Contexts[owner]
+	}
+	if v, handled, e := in.workflowAction(owner, reply, b); handled {
+		return v, e
 	}
 	switch b.Action {
 	case "library":
@@ -360,7 +379,7 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 			}
 		}
 		refs := []files.Ref{}
-		if len(b.Files) > 4 {
+		if len(b.Files) > 16 {
 			return nil, errors.New("too_many_files")
 		}
 		for _, id := range b.Files {

@@ -23,7 +23,7 @@ try {
         $taskPlatform = "$($taskTarget.OS)-$($taskTarget.Arch)"
         $taskPlatformDir = Join-Path $taskOutput $taskPlatform
         New-Item -ItemType Directory -Path $taskPlatformDir -Force | Out-Null
-        foreach ($taskCommand in @('weixin', 'relay', 'worker', 'maintenance', 'retry', 'storageprobe')) {
+        foreach ($taskCommand in @('weixin', 'relay', 'worker', 'maintenance', 'retry', 'storageprobe', 'wechat-personal')) {
             $taskSuffix = if ($taskTarget.OS -eq 'windows') { '.exe' } else { '' }
             $taskBinary = Join-Path $taskPlatformDir ($taskCommand + $taskSuffix)
             & go build -mod=vendor -trimpath -buildvcs=false -ldflags '-s -w' -o $taskBinary "./cmd/$taskCommand"
@@ -49,7 +49,7 @@ try {
         Compress-Archive -Path (Join-Path $taskPlatformDir '*') -DestinationPath (Join-Path $taskOutput "wechat-go-assistant-$taskPlatform.zip") -Force
     }
     [IO.File]::WriteAllText((Join-Path $taskOutput 'manifest.json'), (ConvertTo-Json -InputObject $taskManifest -Depth 4), [Text.UTF8Encoding]::new($false))
-    Write-Output "Built 18 binaries and 3 platform archives in $taskOutput"
+    Write-Output "Built 21 binaries and 3 platform archives in $taskOutput"
 } finally {
     $env:GOOS = $taskPreviousGOOS
     $env:GOARCH = $taskPreviousGOARCH

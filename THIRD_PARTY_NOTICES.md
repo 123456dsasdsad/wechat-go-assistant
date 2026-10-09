@@ -54,3 +54,9 @@ The following supporting modules are vendored at the versions in `go.mod` and
 Platform archives retain these license files under `licenses/vendor/`,
 including the nested libc notices. No external SQLite or C compiler is
 required for the normal `CGO_ENABLED=0` builds.
+
+## Optional personal WeChat and transcription
+
+`github.com/eatmoreapple/openwechat` v1.4.10 is vendored under Apache-2.0; its full notice is retained in `vendor/github.com/eatmoreapple/openwechat/LICENSE`. It is an opt-in transport requiring separate account acceptance.
+
+The optional Python transcription environment installs faster-whisper (MIT), pilk (GPL-3.0) and their dependencies separately. Their upstream licenses apply to those components; their code and model weights are not included in this repository.

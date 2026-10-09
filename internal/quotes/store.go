@@ -24,8 +24,11 @@ type Attachment struct {
 	Store string    `json:"store"` // input or output; validated again when resolved
 }
 type Content struct {
-	Text        string       `json:"text,omitempty"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	JobID          string       `json:"job_id,omitempty"`
+	ConversationID string       `json:"conversation_id,omitempty"`
+	MaterialID     string       `json:"material_id,omitempty"`
+	Text           string       `json:"text,omitempty"`
+	Attachments    []Attachment `json:"attachments,omitempty"`
 }
 type record struct {
 	Scope   string    `json:"scope"`
@@ -48,7 +51,7 @@ func digest(v string) string        { sum := sha256.Sum256([]byte(v)); return he
 func scope(bot, peer string) string { return digest(bot + "\x00" + peer) }
 func key(scope, id string) string   { return digest(scope + "\x00" + id) }
 func validContent(c Content) bool {
-	if len(c.Text) > 256<<10 || len(c.Attachments) > 4 {
+	if len(c.Text) > 256<<10 || len(c.Attachments) > 16 {
 		return false
 	}
 	for _, a := range c.Attachments {

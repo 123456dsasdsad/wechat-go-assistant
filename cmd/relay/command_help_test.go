@@ -108,7 +108,7 @@ func TestWorkbenchCommandLookupIsAuthenticatedAndIndependentOfReplyToken(t *test
 		}
 		if w.Code == 200 {
 			var d helpDirectory
-			if e := json.Unmarshal(w.Body.Bytes(), &d); e != nil || len(d.Groups) != 12 || len(d.Matches) != 3 {
+			if e := json.Unmarshal(w.Body.Bytes(), &d); e != nil || len(d.Groups) != 13 || len(d.Matches) != 3 {
 				t.Fatal(d, e)
 			}
 		}

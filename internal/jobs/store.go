@@ -140,7 +140,7 @@ func (s *Store) EnqueueSelected(source, input, owner, replyContext string, choic
 	return s.EnqueueFiles(source, input, owner, replyContext, choice, nil)
 }
 func validAttachments(refs []files.Ref) bool {
-	if len(refs) > 4 {
+	if len(refs) > 16 {
 		return false
 	}
 	seen := map[string]bool{}

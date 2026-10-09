@@ -55,6 +55,8 @@ func (r *progressReader) Read(p []byte) (int, error) {
 }
 func attachmentError(err error) string {
 	switch err.Error() {
+	case "transcription_engine_unavailable", "transcription_command_invalid", "audio_transcription_failed", "audio_transcript_invalid":
+		return err.Error()
 	case "attachment_storage_full", "attachment_download_failed", "attachment_integrity_failed", "archive_format_unsupported", "invalid_zip", "zip_entry_limit", "zip_unsafe_path", "zip_duplicate_path", "zip_unsupported_entry", "zip_expansion_limit", "zip_entry_unreadable", "zip_path_conflict":
 		return err.Error()
 	}

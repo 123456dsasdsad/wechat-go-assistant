@@ -47,7 +47,7 @@ func (in *inbound) rememberIncoming(msg weixin.Message, refs []files.Ref) {
 		if item.Type == weixin.TextType && item.Text != nil {
 			c.Text = item.Text.Text
 		}
-		if item.Type == weixin.ImageType || item.Type == weixin.FileType {
+		if item.Type == weixin.ImageType || item.Type == weixin.FileType || item.Type == weixin.VoiceType || item.Type == weixin.VideoType {
 			if mediaIndex < len(refs) {
 				c.Attachments = []quotes.Attachment{{Ref: refs[mediaIndex], Store: "input"}}
 			}
@@ -73,6 +73,11 @@ func (in *inbound) saveMedia(ctx context.Context, msg weixin.Message, item weixi
 		name = fmt.Sprintf("微信引用图片-%d.%s", index+1, format)
 	} else if item.File != nil {
 		name = item.File.Name
+	} else if item.Type == weixin.VoiceType || item.Type == weixin.VideoType {
+		name, data, e = voiceMedia(item, data, index)
+		if e != nil {
+			return files.Ref{}, e
+		}
 	} else {
 		return files.Ref{}, errors.New("引用附件格式暂不支持，请使用“转发内容”入口。")
 	}
@@ -92,6 +97,9 @@ func (in *inbound) resolveReference(ctx context.Context, msg weixin.Message, ref
 		id = string(ref.Item.MsgID)
 	}
 	cached, found := in.quotes.Get(in.botID, msg.FromUserID, id)
+	if !found && ref.Item != nil && ref.Item.Text != nil {
+		cached, found = in.quotes.Get(in.botID, msg.FromUserID, quoteTextKey(ref.Item.Text.Text))
+	}
 	text := cached.Text
 	if ref.Item != nil && ref.Item.Type == weixin.TextType && ref.Item.Text != nil && ref.Item.Text.Text != "" {
 		text = ref.Item.Text.Text
@@ -198,7 +206,7 @@ func (in *inbound) bindQuote(msg weixin.Message, input, material string, refs []
 	if len(input)+len(label)+len(material) <= 8192 {
 		return input + label + material, refs, nil
 	}
-	if len(refs) >= 4 {
+	if len(refs) >= 16 {
 		return "", nil, errors.New("引用内容较长，需占用一个文本附件；请减少本次附带文件后重发。")
 	}
 	ref, e := in.files.Save(msg.FromUserID, msg.Key()+":quote-text", "微信引用资料.txt", strings.NewReader(material))

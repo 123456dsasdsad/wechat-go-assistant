@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
@@ -13,6 +15,15 @@ import (
 )
 
 var quotedURL = regexp.MustCompile(`https?://[^\s]+`)
+
+func quoteTextKey(text string) string {
+	text = withoutLinkCredentials(text)
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(text))
+	return "content:" + hex.EncodeToString(sum[:])
+}
 
 func withoutLinkCredentials(text string) string {
 	return quotedURL.ReplaceAllStringFunc(text, func(raw string) string {
@@ -28,7 +39,7 @@ func withoutLinkCredentials(text string) string {
 }
 func quoteRecorder(cache *quotes.Store, bot string, queue *jobs.Store) func(weixin.Reply, weixin.SendResult, string, bool) {
 	return func(reply weixin.Reply, accepted weixin.SendResult, text string, media bool) {
-		if strings.HasPrefix(reply.ClientID, "go-question-") && accepted.MessageID != "" {
+		if strings.HasPrefix(reply.ClientID, "go-question-") {
 			parts := strings.Split(strings.TrimPrefix(reply.ClientID, "go-question-"), "-")
 			if len(parts) == 2 {
 				index, e := strconv.Atoi(parts[1])
@@ -39,8 +50,10 @@ func quoteRecorder(cache *quotes.Store, bot string, queue *jobs.Store) func(weix
 						}
 						for _, b := range j.Questions {
 							if b.ID == parts[0] && index > 0 && index <= len(b.Request.Questions) {
-								if queue.RecordQuestionMessage(j.ID, b.ID, b.Request.Questions[index-1].ID, string(accepted.MessageID)) != nil {
-									fmt.Println(`{"type":"question_message_binding_failed"}`)
+								for _, id := range []string{string(accepted.MessageID), quoteTextKey(text)} {
+									if id != "" && queue.RecordQuestionMessage(j.ID, b.ID, b.Request.Questions[index-1].ID, id) != nil {
+										fmt.Println(`{"type":"question_message_binding_failed"}`)
+									}
 								}
 							}
 						}
@@ -48,10 +61,25 @@ func quoteRecorder(cache *quotes.Store, bot string, queue *jobs.Store) func(weix
 				}
 			}
 		}
-		if cache == nil || accepted.MessageID == "" {
+		if cache == nil {
 			return
 		}
 		c := quotes.Content{Text: withoutLinkCredentials(text)}
+		jobID := outboundJobID(reply.ClientID)
+		if jobID == "" {
+			if m := regexp.MustCompile(`(?m)^任务 ([a-f0-9]{8})`).FindStringSubmatch(text); len(m) == 2 {
+				if j, e := queue.Find(reply.ToUserID, m[1]); e == nil {
+					jobID = j.ID
+				}
+			}
+		}
+		if j, ok := queue.Snapshot(jobID); ok && j.Owner == reply.ToUserID {
+			c.JobID = j.ID
+			c.ConversationID = j.ConversationID
+		}
+		if m := regexp.MustCompile(`材料ID：([a-f0-9]{24})`).FindStringSubmatch(text); len(m) == 2 {
+			c.MaterialID = m[1]
+		}
 		if media {
 			j, ok := queue.Snapshot(outboundJobID(reply.ClientID))
 			if !ok || j.Owner != reply.ToUserID {
@@ -71,8 +99,10 @@ func quoteRecorder(cache *quotes.Store, bot string, queue *jobs.Store) func(weix
 				return
 			}
 		}
-		if cache.Put(bot, reply.ToUserID, string(accepted.MessageID), c) != nil {
-			fmt.Println(`{"type":"quote_cache_write_failed"}`)
+		for _, id := range []string{string(accepted.MessageID), quoteTextKey(text)} {
+			if id != "" && cache.Put(bot, reply.ToUserID, id, c) != nil {
+				fmt.Println(`{"type":"quote_cache_write_failed"}`)
+			}
 		}
 	}
 }

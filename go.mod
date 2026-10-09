@@ -1,6 +1,6 @@
 module github.com/123456dsasdsad/wechat-go-assistant
 
-go 1.24.0
+go 1.25.0
 
 require modernc.org/sqlite v1.39.1
 
@@ -8,6 +8,7 @@ require github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/eatmoreapple/openwechat v1.4.10
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
