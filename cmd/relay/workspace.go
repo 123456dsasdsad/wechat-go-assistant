@@ -253,6 +253,15 @@ func (in *inbound) workspaceSnapshot(owner, query string, archived bool) (map[st
 		sessionRows = append(sessionRows, map[string]any{"session": v, "choice": in.preferences.Current(v.ID), "usage": u})
 	}
 	data := map[string]any{"tasks": tasks, "sessions": sessionRows, "current": current.ID, "files": in.files.List(owner), "models": in.preferences.Catalog().Models, "usage": total, "templates": in.templates.List()}
+	watchRows := []map[string]any{}
+	if in.watches != nil {
+		for _, s := range in.sessions.List(query, archived) {
+			if v, ok := in.watches.Current(owner, s.ID); ok {
+				watchRows = append(watchRows, map[string]any{"watch": v, "status": v.Status(time.Now()), "link": in.watchLink(v)})
+			}
+		}
+	}
+	data["watches"] = watchRows
 	if in.reports != nil {
 		data["accounts"] = in.reports.Latest("accounts")
 		data["updates"] = in.reports.Latest("updates")
@@ -341,6 +350,15 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 		j, e := in.queueLibrary(owner, reply, "portal:"+b.Source, "review_update", b.Name, "更新类别综述")
 		return map[string]any{"id": j.ID, "ok": e == nil}, e
 	case "task":
+		cid := b.Conversation
+		if cid == "" {
+			cid = in.sessions.Current().ID
+		}
+		if in.watches != nil {
+			if _, ok := in.watches.Current(owner, cid); ok {
+				return nil, errors.New("这个会话用于查看原 Codex 任务，请切换其他会话创建任务。")
+			}
+		}
 		refs := []files.Ref{}
 		if len(b.Files) > 4 {
 			return nil, errors.New("too_many_files")

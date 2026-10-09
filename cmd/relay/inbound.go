@@ -13,6 +13,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/maintenance"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/quotes"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/settings"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/watches"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"image"
 	_ "image/jpeg"
@@ -43,6 +44,7 @@ type inbound struct {
 	templates        *assistant.Templates
 	library          *library.Client
 	libraryDrafts    *library.Store
+	watches          *watches.Store
 }
 
 var statusQuestion = regexp.MustCompile(`^(?:现在)?(?:任务|训练|长期训练|跑完长期训练)(?:进度|的结果在哪|完成了吗|跑完了吗|进行到哪了|怎么样了)$`)
@@ -101,6 +103,11 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	if len(media) == 0 && !quoted {
 		if handled, e := in.helpCommand(ctx, msg, input); handled {
 			return e
+		}
+		if in.watches != nil {
+			if v, ok := in.watches.Current(msg.FromUserID, in.sessions.Current().ID); ok && (input == "任务状态" || input == "任务列表" || input == "查看任务" || input == "查看进度" || input == "进度" || input == "任务进度" || statusQuestion.MatchString(strings.Trim(input, " \n。？?!！"))) {
+				return in.reply(ctx, msg, "watch", in.watchText(v))
+			}
 		}
 		if handled, e := in.workspaceCommand(ctx, msg, input); handled {
 			return e
@@ -251,6 +258,11 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 			return in.reply(ctx, msg, "files", b.String())
 		case "文件帮助":
 			return in.reply(ctx, msg, "files", "上传文件\n文件列表\n分析最新文件：你的要求\n分析文件 <ID>：你的要求\n可以直接发送文件。支持 ZIP 解压；RAR、7z 和带密码的 ZIP 请先转换。")
+		}
+	}
+	if in.watches != nil {
+		if _, ok := in.watches.Current(msg.FromUserID, in.sessions.Current().ID); ok {
+			return in.reply(ctx, msg, "watch", "这个会话用于查看原 Codex 任务。发送“任务状态”或“查看进度”；修改任务要求请回到原 Codex 会话。发送“会话列表”可切换其他微信会话。")
 		}
 	}
 	if quoted {

@@ -19,6 +19,11 @@ func (in *inbound) enqueue(source, input, owner, reply, cid string, refs []files
 	if !ok || session.Archived {
 		return jobs.Job{}, errors.New("conversation_unavailable")
 	}
+	if in.watches != nil {
+		if _, ok := in.watches.Current(owner, cid); ok {
+			return jobs.Job{}, errors.New("这个会话用于查看原 Codex 任务，请切换其他会话创建任务。")
+		}
+	}
 	choice, body, e := in.preferences.ChoiceForTask(input, cid)
 	if e != nil {
 		return jobs.Job{}, e

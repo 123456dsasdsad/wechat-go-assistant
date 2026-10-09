@@ -17,6 +17,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/quotes"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/settings"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/watches"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"net"
 	"net/http"
@@ -223,6 +224,10 @@ func run(ctx context.Context) error {
 		return err
 	}
 	in := &inbound{templates: templates, assistant: assistantStore, client: outbound, preferences: preferences, queue: store, files: fileStore, outputs: outputStore, publicURL: cfg.PublicURL, owner: state.Account.OwnerID, sessions: sessions, reports: reports, accounts: accounts, quotes: quoteStore, botID: state.Account.BotID}
+	in.watches, err = watches.Open(filepath.Join(filepath.Dir(cfg.JobsDir), "external-watches.json"))
+	if err != nil {
+		return err
+	}
 	if cfg.LibraryURL != "" {
 		in.library, err = library.NewClient(cfg.LibraryURL, key)
 		if err != nil {
@@ -242,6 +247,10 @@ func run(ctx context.Context) error {
 	privateMaintenance := maintenance.Handler(reports, key)
 	leaseHandler := maintenanceLease(store, key, filepath.Dir(cfg.JobsDir))
 	privateHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/watch/update" {
+			in.watchUpdate(key).ServeHTTP(w, r)
+			return
+		}
 		if r.Method == "POST" && r.URL.Path == "/workspace/grant" {
 			if r.Header.Get("Authorization") != "Bearer "+key {
 				http.Error(w, "unauthorized", 401)
@@ -348,6 +357,8 @@ func run(ctx context.Context) error {
 				}
 			} else if strings.HasPrefix(r.URL.Path, "/wechat-files/task/") {
 				statusHandler.ServeHTTP(w, r)
+			} else if strings.HasPrefix(r.URL.Path, "/wechat-files/watch/") {
+				in.watchHandler().ServeHTTP(w, r)
 			} else if strings.HasPrefix(r.URL.Path, "/wechat-files/result/") {
 				downloadHandler.ServeHTTP(w, r)
 			} else {
