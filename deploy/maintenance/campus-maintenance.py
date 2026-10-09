@@ -61,6 +61,13 @@ def install_deb(archive):
     # Root helper accepts only verified release assets from an allowlisted repository.
     subprocess.run(['sudo','-n','/usr/local/sbin/campus-stack-install-deb',str(archive)],check=True,capture_output=True,timeout=600)
 
+def account_followup_due(now=None):
+    # Midnight starts a new accounting day, not an extra account-report run.
+    # Before 07:00 the cloud snapshot normally still belongs to yesterday.
+    beijing=datetime.timezone(datetime.timedelta(hours=8))
+    now=now or datetime.datetime.now(datetime.timezone.utc)
+    return now.astimezone(beijing).hour>=7
+
 def updates():
     cfg=json.loads(CONFIG.read_text())
     staged=invoke('updates')
@@ -115,7 +122,7 @@ def run():
         if action=='morning':
             # A release lookup failure must not suppress the account report.
             failures=[]
-            for step in [updates,lambda:invoke('accounts')]:
+            for step in [updates,lambda:invoke('accounts','-if-changed')]:
                 try:step()
                 except Exception as ex:failures.append(type(ex).__name__)
             if failures:raise RuntimeError('morning_step_failed')
@@ -125,7 +132,7 @@ def run():
             invoke('retry-publish')
             # Cloud checks may finish after the campus 07:00 timer. Publish a
             # follow-up only when the shared source or campus connectivity changes.
-            invoke('accounts','-if-changed')
+            if account_followup_due():invoke('accounts','-if-changed')
             requested=update_requests()
             if requested:
                 updates()

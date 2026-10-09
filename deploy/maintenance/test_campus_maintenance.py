@@ -1,4 +1,4 @@
-import importlib.util,pathlib,sys,tempfile,unittest
+import datetime,importlib.util,pathlib,sys,tempfile,unittest
 from unittest.mock import patch
 from provider_config import selected_provider_url
 
@@ -23,13 +23,23 @@ base_url = "http://wrong-table"
         calls=[]
         with tempfile.TemporaryDirectory() as root, patch.object(runner,'ROOT',pathlib.Path(root)), patch.object(sys,'argv',['runner','morning']), patch.object(runner,'updates',side_effect=RuntimeError('offline')), patch.object(runner,'invoke',side_effect=lambda *args:calls.append(args)):
             with self.assertRaises(RuntimeError):runner.run()
-        self.assertIn(('accounts',),calls)
+        self.assertIn(('accounts','-if-changed'),calls)
 
     def test_retry_refreshes_late_cloud_snapshot_without_forcing_resend(self):
         calls=[]
-        with tempfile.TemporaryDirectory() as root, patch.object(runner,'ROOT',pathlib.Path(root)), patch.object(sys,'argv',['runner','retry']), patch.object(runner,'invoke',side_effect=lambda *args:calls.append(args)), patch.object(runner,'update_requests',return_value=[]):
+        with tempfile.TemporaryDirectory() as root, patch.object(runner,'ROOT',pathlib.Path(root)), patch.object(sys,'argv',['runner','retry']), patch.object(runner,'invoke',side_effect=lambda *args:calls.append(args)), patch.object(runner,'update_requests',return_value=[]), patch.object(runner,'account_followup_due',return_value=True):
             runner.run()
         self.assertEqual(calls,[('retry-publish',),('accounts','-if-changed')])
+
+    def test_account_followups_wait_until_seven_beijing_on_any_host_timezone(self):
+        utc=datetime.timezone.utc
+        self.assertFalse(runner.account_followup_due(datetime.datetime(2026,10,8,16,0,tzinfo=utc)))
+        self.assertFalse(runner.account_followup_due(datetime.datetime(2026,10,8,22,59,tzinfo=utc)))
+        self.assertTrue(runner.account_followup_due(datetime.datetime(2026,10,8,23,0,tzinfo=utc)))
+        calls=[]
+        with tempfile.TemporaryDirectory() as root, patch.object(runner,'ROOT',pathlib.Path(root)), patch.object(sys,'argv',['runner','retry']), patch.object(runner,'invoke',side_effect=lambda *args:calls.append(args)), patch.object(runner,'update_requests',return_value=[]), patch.object(runner,'account_followup_due',return_value=False):
+            runner.run()
+        self.assertEqual(calls,[('retry-publish',)])
 
     def test_requested_update_is_completed_only_after_native_runner_success(self):
         for failed in [False,True]:

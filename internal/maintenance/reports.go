@@ -16,6 +16,30 @@ import (
 
 var Beijing = time.FixedZone("Asia/Shanghai", 8*3600)
 
+// UpdateReportTitle distinguishes the morning check from a later installation
+// result, including a notification that was delayed by the messaging provider.
+func UpdateReportTitle(updates []Update) string {
+	allDone, installed, deferred := true, false, false
+	for _, u := range updates {
+		switch u.State {
+		case "已是最新稳定版":
+		case "已自动更新，健康检查通过":
+			installed = true
+		case "AI 任务运行中，延后自动安装":
+			deferred, allDone = true, false
+		default:
+			allDone = false
+		}
+	}
+	if deferred {
+		return "软件更新待安装"
+	}
+	if allDone && installed {
+		return "软件更新完成"
+	}
+	return "软件更新检查"
+}
+
 type Report struct {
 	ID          string    `json:"id"`
 	Host        string    `json:"host"`

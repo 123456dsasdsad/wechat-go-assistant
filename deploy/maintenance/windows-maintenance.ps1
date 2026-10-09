@@ -142,16 +142,22 @@ function Apply-Updates {
  $taskResult=Join-Path $taskRoot 'updates-result.json';[IO.File]::WriteAllText($taskResult,(ConvertTo-Json -InputObject @($taskUpdates) -Depth 8),[Text.UTF8Encoding]::new($false))
  $null=Invoke-Maintenance 'publish' @('-input',$taskResult)
 }
-function Check-Accounts {
+function Check-Accounts([switch]$ResumeOnly) {
  $taskLease=Lease 'acquire'
  if(!$taskLease){[IO.File]::WriteAllText((Join-Path $taskRoot 'accounts-pending.flag'),'1');return}
  try {
   if(!(Test-Idle)){[IO.File]::WriteAllText((Join-Path $taskRoot 'accounts-pending.flag'),'1');return}
-  $null=Invoke-Maintenance 'accounts'
   $taskDay=[TimeZoneInfo]::ConvertTimeBySystemTimeZoneId([DateTime]::UtcNow,'China Standard Time').ToString('yyyy-MM-dd')
-  $taskSummary=Get-Content -Raw -Encoding UTF8 (Join-Path $taskRoot ('accounts-'+$taskDay+'.json'))|ConvertFrom-Json
+  $taskSummaryPath=Join-Path $taskRoot ('accounts-'+$taskDay+'.json')
+  # Catalog retries must not repeat today's already completed account check,
+  # mutate credentials again, or generate another quota report every 15 minutes.
+  $taskAccountsChecked=$false
+  if(!$ResumeOnly -or !(Test-Path -LiteralPath $taskSummaryPath)){
+   $null=Invoke-Maintenance 'accounts' @('-day',$taskDay);$taskAccountsChecked=$true
+  }
+  $taskSummary=Get-Content -Raw -Encoding UTF8 $taskSummaryPath|ConvertFrom-Json
   $taskCatalog=Invoke-Maintenance 'models'
-  if($taskSummary.reload_required -or $taskCatalog.reload_required){Restart-OwnedTask 'Cockpit-Account-Pool' 'C:\CodexStack\cockpit-gateway\1.3.65\cockpit-cliproxy.exe';if(!(Wait-ManagedHealth 'Cockpit gateway' 'C:\CodexStack\cockpit-gateway\1.3.65\cockpit-cliproxy.exe')){throw 'Refreshed pool health check failed'}}
+  if(($taskAccountsChecked -and $taskSummary.reload_required) -or $taskCatalog.reload_required){Restart-OwnedTask 'Cockpit-Account-Pool' 'C:\CodexStack\cockpit-gateway\1.3.65\cockpit-cliproxy.exe';if(!(Wait-ManagedHealth 'Cockpit gateway' 'C:\CodexStack\cockpit-gateway\1.3.65\cockpit-cliproxy.exe')){throw 'Refreshed pool health check failed'}}
   if($taskCatalog.pending -gt 0){[IO.File]::WriteAllText((Join-Path $taskRoot 'accounts-pending.flag'),'1')}
   else{Remove-Item -LiteralPath (Join-Path $taskRoot 'accounts-pending.flag') -ErrorAction SilentlyContinue}
  }finally{$null=Lease 'release' $taskLease.lease}
@@ -166,7 +172,7 @@ try{
   'updates'{Apply-Updates}
   'accounts'{Check-Accounts}
   'usage'{$null=Invoke-Maintenance 'usage'}
-  'retry'{$null=Invoke-Maintenance 'retry-publish';$taskRequested=Apply-RequestedUpdates;if(Test-Path (Join-Path $taskRoot 'accounts-pending.flag')){Check-Accounts};$taskStaged=Join-Path $taskRoot 'updates-result.json';if(!$taskRequested -and (Test-Path $taskStaged)){$taskLast=Get-Content -Raw -Encoding UTF8 $taskStaged|ConvertFrom-Json;if(@($taskLast|Where-Object{$_.state -eq 'AI 任务运行中，延后自动安装'}).Count -and (Test-Idle)){Apply-Updates}}}
+  'retry'{$null=Invoke-Maintenance 'retry-publish';$taskRequested=Apply-RequestedUpdates;if(Test-Path (Join-Path $taskRoot 'accounts-pending.flag')){Check-Accounts -ResumeOnly};$taskStaged=Join-Path $taskRoot 'updates-result.json';if(!$taskRequested -and (Test-Path $taskStaged)){$taskLast=Get-Content -Raw -Encoding UTF8 $taskStaged|ConvertFrom-Json;if(@($taskLast|Where-Object{$_.state -eq 'AI 任务运行中，延后自动安装'}).Count -and (Test-Idle)){Apply-Updates}}}
  }
  [IO.File]::WriteAllText((Join-Path $taskRoot ('last-'+$Action+'.json')),(@{ok=$true;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 }catch{

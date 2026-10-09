@@ -163,7 +163,7 @@ func run() error {
 		if cfg.Host == "campus" {
 			hostName = "校园"
 		}
-		fmt.Fprintf(&out, "【软件更新｜%s｜%s】\n检查时间：%s（北京时间）", day, hostName, time.Now().In(maintenance.Beijing).Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(&out, "【%s｜%s｜%s】\n检查时间：%s（北京时间）", maintenance.UpdateReportTitle(updates), day, hostName, time.Now().In(maintenance.Beijing).Format("2006-01-02 15:04:05"))
 		for _, u := range updates {
 			fmt.Fprintf(&out, "\n\n%s\n版本：%s → %s\n结果：%s", u.Name, u.Version, u.Latest, u.State)
 		}

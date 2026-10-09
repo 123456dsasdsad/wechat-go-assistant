@@ -94,6 +94,15 @@ copying account credentials. Missing or previous-day snapshots are explicitly
 marked unverified or stale. The 15-minute retry publishes a follow-up when cloud
 checks finish later; unchanged results are not sent again. An update lookup
 failure does not suppress the campus morning account check.
+Campus account follow-ups start at 07:00 Beijing time; the midnight retry does
+not publish a second daily account report with yesterday's pool snapshot. Source
+report IDs, timestamps and send receipts alone never count as changed results.
+The cloud catalog retry resumes model-permission checks without repeating a
+completed daily account check or its quota notification. A missing daily account
+checkpoint is still retried, and failed report submissions retain their outbox.
+Update notifications distinguish `软件更新待安装`, `软件更新完成` and
+`软件更新检查`. A completion after a deferred morning check is a new result;
+the original check time remains visible if WeChat accepts it later.
 Private queries can select a structured source with
 `/maintenance/reports?host=cloud&kind=accounts`. This uses the existing private
 Bearer authentication. Campus configuration adds `gateway_url` (the selected

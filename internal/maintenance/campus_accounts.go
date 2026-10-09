@@ -105,8 +105,8 @@ func CheckCampusAccounts(ctx context.Context, c HTTPDoer, relayURL, relayKey, ga
 	return r
 }
 
-// SameResult ignores probe time and notification receipts so a scheduled retry
-// only publishes changed source data, freshness, or connectivity.
+// SameResult ignores probe/source timestamps, report IDs and notification
+// receipts. A fresh copy of the same source is not a change in account status.
 func (r CampusAccounts) SameResult(other CampusAccounts) bool {
 	if r.Day != other.Day || r.Stale != other.Stale || r.SourceError != other.SourceError || r.Relay != other.Relay || r.Gateway != other.Gateway {
 		return false
@@ -114,7 +114,7 @@ func (r CampusAccounts) SameResult(other CampusAccounts) bool {
 	if r.Source == nil || other.Source == nil {
 		return r.Source == nil && other.Source == nil
 	}
-	return r.Source.ID == other.Source.ID && r.Source.Created.Equal(other.Source.Created) && r.Source.Text == other.Source.Text
+	return r.Source.Day == other.Source.Day && r.Source.Text == other.Source.Text
 }
 
 func (r CampusAccounts) Text() string {

@@ -125,6 +125,22 @@ func TestCampusAccountsDetailsFreshnessAndConnectivity(t *testing.T) {
 			if !got.SameResult(later) {
 				t.Fatal("unchanged retry will spam")
 			}
+			if got.Source != nil {
+				copy := *got.Source
+				copy.ID = strings.Repeat("f", 24)
+				copy.Created = now
+				copy.Attempts = 3
+				copy.Accepted = now
+				later.Source = &copy
+				if !got.SameResult(later) {
+					t.Fatal("source timestamp/receipt change will spam")
+				}
+				copy.Text += "\n额度状态已变化"
+				if got.SameResult(later) {
+					t.Fatal("real account change suppressed")
+				}
+				later = got
+			}
 			later.Stale = !got.Stale
 			if got.SameResult(later) {
 				t.Fatal("freshness change suppressed")
