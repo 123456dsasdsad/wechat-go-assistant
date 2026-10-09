@@ -52,11 +52,29 @@ The cloud also synchronizes each account's model catalog using GET
 returned model permissions, with no Team/Free/Plus plan allowlist. Automatic
 exclusions are tracked separately and removed when permissions return. Existing
 operator exclusions and API key scopes remain intact. Import activation checks
-the catalog before making updated credentials eligible; empty/failed catalogs
-retain known rules and leave new credentials pending. Recent catalog checks are
+the catalog before making updated credentials eligible; empty catalogs and
+transient failures retain known rules and leave new credentials pending. A
+catalog HTTP 401 temporarily excludes that account from all configured models,
+retaining its credentials and account identity for refresh or re-upload. This
+known routing suspension does not block activating healthy accounts. A later
+successful catalog check removes only those automatic exclusions, and bypasses
+the catalog cache while authorization is pending. Recent successful checks are
 cached for 30 minutes; each run is bounded to five minutes and saves verified
 progress for a deferred retry. The daily account runner and its existing retry
 queue use the same check.
+
+`deploy/accounts/repair-gateway.ps1` applies the cloud gateway recovery policy
+under the shared maintenance mutex and idle lease. It validates a staged
+maintenance binary by SHA-256, saves private backups, verifies required models
+against real account catalogs, and reloads the gateway with rollback on failure.
+The policy keeps the account concurrency limit and allows 120 seconds for queued
+slots and credential cooldowns, within a 240-second stream-open timeout. It
+does not replace requested models with aliases or disable upstream cooldowns;
+upstream terminal errors remain visible to clients. The default required model
+is `gpt-5.6-luna`, which must be supported by a verified account before activation.
+Required models are added to the global model list and the managed
+`campus-worker` key's existing allowlist. Account scopes, other keys, and explicit
+model exclusions are preserved.
 
 Phone commands: `用量日报`, `账号状态`, `失效账号`, `更新状态`, `运维日报`.
 `校园账号检查` and `校园账号状态` return the campus report directly.

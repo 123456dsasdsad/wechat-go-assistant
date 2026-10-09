@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,10 +65,17 @@ func CatalogExclusions(auth, manifest map[string]any, id string, models []string
 	if e != nil {
 		return e
 	}
+	var nextOwned []string
+	for _, model := range models {
+		explicit := !containsModel(owned, model) && (containsModel(existing, model) || containsModel(ruleModels, model))
+		if !explicit && !containsModel(nextOwned, model) {
+			nextOwned = append(nextOwned, model)
+		}
+	}
 	match["excludedModels"] = merge(ruleModels)
 	manifest["accountModelRules"] = rules
 	auth["excluded_models"] = merge(existing)
-	auth["catalog_excluded_models"] = append([]string{}, models...)
+	auth["catalog_excluded_models"] = append([]string{}, nextOwned...)
 	return nil
 }
 
@@ -110,9 +118,10 @@ type ModelCatalogAccount struct {
 	Excluded  []string `json:"excluded,omitempty"`
 }
 type ModelCatalogSummary struct {
-	Accounts []ModelCatalogAccount `json:"accounts"`
-	Reload   bool                  `json:"reload_required"`
-	Pending  int                   `json:"pending"`
+	Accounts  []ModelCatalogAccount `json:"accounts"`
+	Reload    bool                  `json:"reload_required"`
+	Pending   int                   `json:"pending"`
+	Suspended int                   `json:"authorization_pending,omitempty"`
 }
 
 // SyncModelCatalog uses the account-specific upstream catalog, never a plan
@@ -156,7 +165,8 @@ func SyncModelCatalog(ctx context.Context, client HTTPDoer, root string, dry boo
 		}
 		checked, _ := time.Parse(time.RFC3339, str(auth, "catalog_checked_at"))
 		cachedModels, _ := modelStrings(auth["catalog_checked_models"])
-		if !checked.IsZero() && time.Since(checked) >= 0 && time.Since(checked) < 30*time.Minute && len(cachedModels) == len(models) {
+		authorizationPending, _ := auth["catalog_authorization_pending"].(bool)
+		if !authorizationPending && !checked.IsZero() && time.Since(checked) >= 0 && time.Since(checked) < 30*time.Minute && len(cachedModels) == len(models) {
 			same := true
 			for _, model := range models {
 				if !containsModel(cachedModels, model) {
@@ -180,6 +190,28 @@ func SyncModelCatalog(ctx context.Context, client HTTPDoer, root string, dry boo
 		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		status, body, err := request(probeCtx, client, "GET", "https://chatgpt.com/backend-api/codex/models?client_version=0.160.1", nil, map[string]string{"Authorization": "Bearer " + str(auth, "access_token"), "ChatGPT-Account-Id": str(auth, "account_id"), "originator": "codex_cli_rs", "User-Agent": "codex_cli_rs/0.160.1"})
 		cancel()
+		// Unauthorized credentials cannot serve any inference model now. Suspend
+		// only catalog-owned routing rules, retaining credentials for the account
+		// refresh runner or a later upload. This known exclusion must not block
+		// activating healthy accounts as an unresolved catalog check would.
+		if err == nil && status == http.StatusUnauthorized {
+			before, _ := json.Marshal(auth["excluded_models"])
+			if e = CatalogExclusions(auth, manifest, id, models); e != nil {
+				return sum, e
+			}
+			after, _ := json.Marshal(auth["excluded_models"])
+			if string(before) != string(after) {
+				sum.Reload = true
+			}
+			auth["catalog_authorization_pending"] = true
+			delete(auth, "catalog_checked_at")
+			writes[path] = auth
+			check.State = "authorization_pending"
+			check.Excluded = append([]string{}, models...)
+			sum.Suspended++
+			sum.Accounts = append(sum.Accounts, check)
+			continue
+		}
 		var catalog struct {
 			Models []struct {
 				Slug      string `json:"slug"`
@@ -221,6 +253,7 @@ func SyncModelCatalog(ctx context.Context, client HTTPDoer, root string, dry boo
 			sum.Reload = true
 		}
 		auth["catalog_checked_at"] = time.Now().UTC().Format(time.RFC3339)
+		delete(auth, "catalog_authorization_pending")
 		auth["catalog_models"] = check.Available
 		auth["catalog_checked_models"] = append([]string{}, models...)
 		writes[path] = auth
