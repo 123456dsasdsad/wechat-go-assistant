@@ -38,6 +38,7 @@ type Result struct {
 }
 
 var ErrFailed = errors.New("codex_turn_failed")
+var ErrOverloaded = errors.New("codex_server_overloaded")
 
 func Run(ctx context.Context, c Config, prompt string) (Result, error) {
 	var result Result

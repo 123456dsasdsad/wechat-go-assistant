@@ -14,6 +14,21 @@ import (
 	"time"
 )
 
+func TestOverloadReplyAndStatusDescribeFailureAndOriginalTaskRetry(t *testing.T) {
+	defer metadb.CloseAll()
+	outputs, _ := files.Open(t.TempDir())
+	j := jobs.Job{ID: strings.Repeat("a", 24), Owner: "owner", Input: "语音验收", Error: "codex_server_overloaded", Status: "delivered", Created: time.Now()}
+	for _, origin := range []string{"", "https://example.com/wechat-files/"} {
+		text := resultText(j, nil, outputs, origin)
+		if !strings.Contains(text, "上游模型暂时过载") || !strings.Contains(text, "重试任务 aaaaaaaa") || strings.Contains(text, "处理已完成") {
+			t.Fatal("overload confused with task completion", text)
+		}
+	}
+	if !strings.Contains(taskStatusLabel(j), "执行失败") {
+		t.Fatal("delivered failure described as completed", taskStatusLabel(j))
+	}
+}
+
 func TestTwoQuestionsKeepTheirOwnIdentityAfterNewQuestionAndRename(t *testing.T) {
 	defer metadb.CloseAll()
 	sessions, _ := conversations.Open(t.TempDir() + "/sessions.json")

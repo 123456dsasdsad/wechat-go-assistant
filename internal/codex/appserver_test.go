@@ -97,6 +97,58 @@ func fakeAppServer(mode string) {
 			emit(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": thread, "turnId": turn, "item": map[string]string{"id": "answer", "type": "agentMessage", "phase": "final_answer", "text": "最终结论"}}})
 			emit(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": thread, "turn": map[string]string{"id": turn, "status": "completed"}}})
 		}
+		if strings.HasPrefix(mode, "failure-") && r.Method == "turn/start" {
+			info := "serverOverloaded"
+			if mode == "failure-private" {
+				info = "other"
+			}
+			problem := map[string]any{"codexErrorInfo": info, "message": "provider secret sk-private-do-not-return"}
+			notificationThread := thread
+			if mode == "failure-foreign" {
+				notificationThread = "22222222-2222-4222-8222-222222222222"
+			}
+			if mode != "failure-terminal" {
+				emit(map[string]any{"method": "error", "params": map[string]any{"threadId": notificationThread, "turnId": turn, "error": problem, "willRetry": mode == "failure-recovered"}})
+			}
+			emit(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": thread, "turnId": turn, "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "partial answer"}}})
+			status := "failed"
+			var terminal any
+			if mode == "failure-terminal" {
+				terminal = problem
+			}
+			if mode == "failure-final-other" {
+				terminal = map[string]any{"codexErrorInfo": "badRequest", "message": "private provider message"}
+			}
+			if mode == "failure-recovered" {
+				status = "completed"
+			}
+			emit(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": thread, "turn": map[string]any{"id": turn, "status": status, "error": terminal}}})
+		}
+	}
+}
+
+func TestAppServerPreservesOverloadWithoutLeakingProviderMessages(t *testing.T) {
+	for _, mode := range []string{"failure-terminal", "failure-notification", "failure-foreign", "failure-private", "failure-final-other", "failure-recovered"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("CAMPUS_TEST_RPC", mode)
+			c := Config{Binary: os.Args[0], Home: t.TempDir(), Directory: t.TempDir(), Key: "key", Model: "gpt-6-sol", Permissions: ":danger-full-access", Persistent: true, AppServer: true, ThreadID: fakeThread}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			result, err := Run(ctx, c, "isolated diagnostic")
+			if mode == "failure-recovered" {
+				if err != nil || result.Text != "partial answer" {
+					t.Fatal("recovered retry reported as failure", result, err)
+				}
+				return
+			}
+			want := ErrFailed
+			if mode == "failure-terminal" || mode == "failure-notification" {
+				want = ErrOverloaded
+			}
+			if err != want || result.Text != "" || result.ThreadID != fakeThread {
+				t.Fatal("failure lost, leaked private data, or accepted partial answer", result, err)
+			}
+		})
 	}
 }
 

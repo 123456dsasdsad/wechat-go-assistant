@@ -169,6 +169,7 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 		baseline = usage.Tokens{Available: true}
 	}
 	pending := map[int]steering.Receipt{}
+	var lastFailure error
 	progress := newProgress(c.Progress)
 	seen := map[string]bool{}
 	acknowledge := func(r steering.Receipt) {
@@ -271,13 +272,27 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 				}
 				continue
 			}
+			if m.Method == "error" {
+				var v struct {
+					ThreadID string          `json:"threadId"`
+					TurnID   string          `json:"turnId"`
+					Error    json.RawMessage `json:"error"`
+				}
+				if json.Unmarshal(m.Params, &v) == nil && v.ThreadID == thread.Thread.ID && v.TurnID == start.Turn.ID {
+					lastFailure = appServerFailure(v.Error)
+				}
+				continue
+			}
 			var event struct {
-				ThreadID string                                 `json:"threadId"`
-				TurnID   string                                 `json:"turnId"`
-				ItemID   string                                 `json:"itemId"`
-				Delta    string                                 `json:"delta"`
-				Turn     struct{ ID, Status string }            `json:"turn"`
-				Item     struct{ ID, Type, Text, Phase string } `json:"item"`
+				ThreadID string `json:"threadId"`
+				TurnID   string `json:"turnId"`
+				ItemID   string `json:"itemId"`
+				Delta    string `json:"delta"`
+				Turn     struct {
+					ID, Status string
+					Error      json.RawMessage `json:"error"`
+				} `json:"turn"`
+				Item struct{ ID, Type, Text, Phase string } `json:"item"`
 			}
 			if m.Method == "item/agentMessage/delta" {
 				if json.Unmarshal(m.Params, &event) == nil && event.ThreadID == thread.Thread.ID && event.TurnID == start.Turn.ID && event.ItemID != "" {
@@ -303,6 +318,14 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 				if m.Method == "turn/completed" && event.Turn.ID == start.Turn.ID {
 					if event.Turn.Status != "completed" || strings.TrimSpace(result.Text) == "" {
 						result.Text = ""
+						if event.Turn.Status != "completed" {
+							if len(event.Turn.Error) > 0 && string(event.Turn.Error) != "null" {
+								return result, appServerFailure(event.Turn.Error)
+							}
+							if lastFailure != nil {
+								return result, lastFailure
+							}
+						}
 						return result, ErrFailed
 					}
 					if len(result.Text) > 64<<10 {
@@ -314,6 +337,18 @@ func runAppServer(ctx context.Context, c Config, prompt string) (result Result, 
 			}
 		}
 	}
+}
+
+// Only forward stable codes. Provider messages may contain private URLs or keys.
+func appServerFailure(raw json.RawMessage) error {
+	var v struct {
+		Code           string          `json:"code"`
+		CodexErrorInfo json.RawMessage `json:"codexErrorInfo"`
+	}
+	if json.Unmarshal(raw, &v) == nil && (string(v.CodexErrorInfo) == `"serverOverloaded"` || v.Code == "server_is_overloaded") {
+		return ErrOverloaded
+	}
+	return ErrFailed
 }
 
 func pendingID(id json.RawMessage, pending map[int]steering.Receipt) (steering.Receipt, bool) {

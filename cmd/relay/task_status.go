@@ -21,6 +21,12 @@ func taskStatusLabel(j jobs.Job) string {
 	if j.Error == "user_canceled" {
 		return "已停止"
 	}
+	if j.Error != "" {
+		if j.Error == "codex_server_overloaded" {
+			return "执行失败：上游模型暂时过载"
+		}
+		return "执行失败"
+	}
 	if j.OutputPending {
 		return "AI已完成，附件回传中（自动重试）"
 	}

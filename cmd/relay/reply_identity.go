@@ -23,10 +23,7 @@ func resultText(j jobs.Job, sessions *conversations.Store, outputs *files.Store,
 	}
 	text := questionIdentity(j) + "\n" + j.Model + " / " + j.Effort + "\n\n答复：\n" + j.Result
 	if j.Error != "" {
-		text = questionIdentity(j) + "\n处理失败（" + j.Error + "）。"
-		if hint := fileErrorHint(j.Error); hint != "" {
-			text += "\n" + hint
-		}
+		text = questionIdentity(j) + "\n" + failureText(j)
 	}
 	if outputs != nil && origin != "" {
 		if link, e := outputs.TaskLink(origin, j.Owner, j.ID); e == nil {
@@ -44,7 +41,7 @@ func resultText(j jobs.Job, sessions *conversations.Store, outputs *files.Store,
 			}
 			answer := j.Result
 			if j.Error != "" {
-				answer = "处理失败（" + j.Error + "）。" + fileErrorHint(j.Error)
+				answer = failureText(j)
 			}
 			runes := []rune(answer)
 			if len(runes) > 800 {
@@ -67,6 +64,16 @@ func resultText(j jobs.Job, sessions *conversations.Store, outputs *files.Store,
 		}
 	}
 	return sessionHeader + text
+}
+func failureText(j jobs.Job) string {
+	if j.Error == "codex_server_overloaded" {
+		return "上游模型暂时过载，本次任务未完成。请稍后发送“重试任务 " + j.ID[:8] + "”继续原会话。"
+	}
+	text := "处理失败（" + j.Error + "）。"
+	if hint := fileErrorHint(j.Error); hint != "" {
+		text += "\n" + hint
+	}
+	return text
 }
 func pendingMedia(j jobs.Job) bool {
 	if j.OutputPending || j.Status != "done" || j.MediaDeferred || !j.PartDelivered("text") {
