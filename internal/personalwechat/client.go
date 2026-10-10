@@ -10,11 +10,15 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
+	"fmt"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"github.com/eatmoreapple/openwechat"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,29 +55,142 @@ func Login(ctx context.Context, path string, qr func(string)) ([]string, error) 
 	f.Close()
 	bot := openwechat.New(ctx)
 	openwechat.Desktop.Prepare(bot)
+	trace := &loginTrace{stage: "start"}
+	bot.Caller.Client.AddHttpHook(trace)
 	bot.UUIDCallback = func(uuid string) { qr(openwechat.GetQrcodeUrl(uuid)) }
 	store := openwechat.NewFileHotReloadStorage(path)
 	defer store.Close()
 	if e = bot.HotLogin(store, openwechat.HotLoginWithRetry(true)); e != nil {
-		return nil, errors.New("personal_wechat_login_failed")
+		return nil, trace.failure(e)
 	}
 	if e = bot.DumpHotReloadStorage(); e != nil {
-		return nil, e
+		return nil, errors.New("personal_wechat_cookie_save_failed")
 	}
 	_ = os.Chmod(path, 0600)
 	self, e := bot.GetCurrentUser()
 	if e != nil {
-		return nil, e
+		return nil, errors.New("personal_wechat_login_not_initialized")
 	}
 	friends, e := self.Friends()
 	if e != nil {
-		return nil, e
+		return nil, trace.failure(e)
 	}
 	rows := []string{}
 	for _, f := range friends {
 		rows = append(rows, f.NickName+"（备注："+f.RemarkName+"）")
 	}
 	return rows, nil
+}
+
+// Keep useful error categories without returning response bodies, login URLs or
+// session credentials from the SDK.
+func loginError(err error) error {
+	switch {
+	case errors.Is(err, openwechat.ErrForbidden):
+		return errors.New("personal_wechat_login_denied")
+	case errors.Is(err, openwechat.ErrLoginTimeout):
+		return errors.New("personal_wechat_qr_expired")
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return errors.New("personal_wechat_login_canceled")
+	}
+	var network net.Error
+	if errors.As(err, &network) || openwechat.IsNetworkError(err) {
+		return errors.New("personal_wechat_login_network_error")
+	}
+	var ret openwechat.Ret
+	if errors.As(err, &ret) && (ret == 1203 || ret == 1205 || ret == 1100 || ret == 1101) {
+		return errors.New("personal_wechat_login_denied")
+	}
+	if err != nil {
+		text := strings.ToLower(err.Error())
+		for _, marker := range []string{"不允许", "禁止登录", "环境异常", "login forbidden", "restricted from logging in", "不能登录网页版", "不能登录微信网页版"} {
+			if strings.Contains(text, marker) {
+				return errors.New("personal_wechat_login_denied")
+			}
+		}
+	}
+	return errors.New("personal_wechat_login_failed")
+}
+
+// Retain only fixed stage names, numeric status/return codes and the presence of
+// a redirect. Never retain URLs, headers, response bodies or SDK error text.
+type loginTrace struct {
+	mu       sync.Mutex
+	stage    string
+	status   int
+	ret      *int
+	location bool
+}
+
+func (t *loginTrace) BeforeRequest(req *http.Request) {
+	stage := "other"
+	if req != nil && req.URL != nil {
+		switch filepath.Base(req.URL.Path) {
+		case "jslogin":
+			stage = "qr"
+		case "login":
+			stage = "scan_poll"
+		case "webwxnewloginpage":
+			stage = "confirm"
+		case "webwxinit":
+			stage = "initialize"
+		case "webwxstatusnotify":
+			stage = "notify"
+		case "webwxgetcontact":
+			stage = "contacts"
+		}
+	}
+	t.mu.Lock()
+	t.stage, t.status, t.ret, t.location = stage, 0, nil, false
+	t.mu.Unlock()
+}
+
+func (t *loginTrace) AfterRequest(resp *http.Response, _ error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if resp != nil {
+		t.status = resp.StatusCode
+		t.location = resp.Header.Get("Location") != ""
+		if t.stage == "confirm" && resp.Body != nil {
+			// Read only the return-code field, preserving the exact stream for the
+			// SDK. No session fields or response text are decoded or retained.
+			body := resp.Body
+			prefix, err := io.ReadAll(io.LimitReader(body, 64<<10))
+			rest := io.Reader(body)
+			if err != nil {
+				rest = loginReadError{err}
+			}
+			resp.Body = struct {
+				io.Reader
+				io.Closer
+			}{io.MultiReader(bytes.NewReader(prefix), rest), body}
+			if err == nil {
+				var status struct {
+					Ret *int `xml:"ret"`
+				}
+				if xml.Unmarshal(prefix, &status) == nil {
+					t.ret = status.Ret
+				}
+			}
+		}
+	}
+}
+
+type loginReadError struct{ err error }
+
+func (r loginReadError) Read([]byte) (int, error) { return 0, r.err }
+
+func (t *loginTrace) failure(err error) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	code := loginError(err)
+	if t.ret != nil {
+		if typed := loginError(openwechat.Ret(*t.ret)); typed.Error() == "personal_wechat_login_denied" {
+			code = typed
+		}
+		return fmt.Errorf("%s; stage=%s; http=%d; ret=%d; location=%t", code, t.stage, t.status, *t.ret, t.location)
+	}
+	return fmt.Errorf("%s; stage=%s; http=%d; location=%t", code, t.stage, t.status, t.location)
 }
 func New(ctx context.Context, cfg Config) (*Client, error) {
 	if !filepath.IsAbs(cfg.Root) || !filepath.IsAbs(cfg.CookiePath) || cfg.FriendRemark == "" || cfg.OwnerAlias == "" {
@@ -95,19 +212,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	c.bot = bot
 	bot.UUIDCallback = func(string) {}
 	// Never select the first sender. Only one exact contact remark is authorized.
-	bot.MessageHandler = func(m *openwechat.Message) {
-		c.mu.Lock()
-		allowed := c.friend != nil && m.FromUserName == c.friend.UserName
-		c.mu.Unlock()
-		if !allowed || m.IsSendByGroup() {
-			return
-		}
-		if e := c.receive(m); e != nil {
-			c.mu.Lock()
-			c.err = e
-			c.mu.Unlock()
-		}
-	}
+	bot.MessageHandler = c.handleMessage
 	storage := openwechat.NewFileHotReloadStorage(cfg.CookiePath)
 	if e = bot.HotLogin(storage); e != nil {
 		storage.Close()
@@ -142,6 +247,22 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	// SDK retains the storage; close it when the bot context exits.
 	go func() { <-ctx.Done(); storage.Close() }()
 	return c, nil
+}
+func (c *Client) handleMessage(m *openwechat.Message) {
+	if m == nil {
+		return
+	}
+	c.mu.Lock()
+	allowed := c.friend != nil && m.FromUserName == c.friend.UserName
+	c.mu.Unlock()
+	if !allowed || strings.HasPrefix(m.FromUserName, "@@") || strings.HasPrefix(m.ToUserName, "@@") {
+		return
+	}
+	if e := c.receive(m); e != nil {
+		c.mu.Lock()
+		c.err = e
+		c.mu.Unlock()
+	}
 }
 func (c *Client) receive(m *openwechat.Message) error {
 	msg := weixin.Message{MessageID: weixin.ID("personal:" + m.MsgId), FromUserID: c.cfg.OwnerAlias, Type: 1, CreatedAt: m.CreateTime * 1000, ContextToken: "personal"}

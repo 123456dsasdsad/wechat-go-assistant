@@ -20,6 +20,10 @@ import (
 
 func TestMain(m *testing.M) {
 	transcriptionTestHelper()
+	if fixture := os.Getenv("CAMPUS_WORKER_WAIT_FIXTURE"); fixture != "" {
+		fakeWaitingCodex(fixture)
+		os.Exit(0)
+	}
 	if fixture := os.Getenv("CAMPUS_WORKER_POOL_FIXTURE"); fixture != "" {
 		fakeParallelCodex(fixture)
 		os.Exit(0)
