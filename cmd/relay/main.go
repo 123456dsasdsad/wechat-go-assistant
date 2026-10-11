@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/accesskeys"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/accountupload"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/assistant"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
@@ -238,6 +239,14 @@ func run(ctx context.Context) error {
 		return err
 	}
 	in := &inbound{templates: templates, assistant: assistantStore, client: outbound, preferences: preferences, queue: store, files: fileStore, outputs: outputStore, publicURL: cfg.PublicURL, owner: state.Account.OwnerID, sessions: sessions, reports: reports, accounts: accounts, quotes: quoteStore, botID: state.Account.BotID}
+	in.access, err = accesskeys.Open(filepath.Join(filepath.Dir(cfg.JobsDir), "access-keys"), key)
+	if err != nil {
+		return errors.New("access_store_unavailable")
+	}
+	defer in.access.Close()
+	if _, _, err = in.access.EnsurePrimary(in.owner); err != nil {
+		return errors.New("access_key_unavailable")
+	}
 	in.materials, err = materials.Open(filepath.Join(filepath.Dir(cfg.JobsDir), "materials"))
 	if err != nil {
 		return err
@@ -280,7 +289,35 @@ func run(ctx context.Context) error {
 				http.Error(w, "grant unavailable", 503)
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]string{"url": cfg.PublicURL + "manage/#" + token})
+			g, _, e := in.access.EnsurePrimary(in.owner)
+			if e != nil {
+				http.Error(w, "grant unavailable", 503)
+				return
+			}
+			accessSession, _, e := in.access.Session(g)
+			if e != nil {
+				http.Error(w, "grant unavailable", 503)
+				return
+			}
+			handoff, e := in.access.Handoff(g)
+			if e != nil {
+				http.Error(w, "grant unavailable", 503)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"url": cfg.PublicURL + "manage/#" + token, "access_session": accessSession, "browser_url": cfg.PublicURL + "access/handoff?code=" + handoff})
+			return
+		}
+		if r.URL.Path == "/access/status" && r.Method == "GET" {
+			if r.Header.Get("Authorization") != "Bearer "+key {
+				http.Error(w, "unauthorized", 401)
+				return
+			}
+			v, e := in.access.List(in.owner)
+			if e != nil {
+				http.Error(w, "storage unavailable", 503)
+				return
+			}
+			json.NewEncoder(w).Encode(v)
 			return
 		}
 		if r.URL.Path == "/maintenance/lease" {
@@ -388,7 +425,7 @@ func run(ctx context.Context) error {
 		if err != nil {
 			return errors.New("upload_listener_unavailable")
 		}
-		uploadServer := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384}
+		uploadServer := &http.Server{Handler: in.accessGate(handler), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384}
 		go func() { serveErrors <- uploadServer.Serve(uploadListener) }()
 		defer func() {
 			shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -401,6 +438,7 @@ func run(ctx context.Context) error {
 		go activateAccounts(ctx, cfg, key, accounts, reports)
 	}
 	go runSchedules(ctx, assistantStore, store, sessions, outbound, state.Account.OwnerID)
+	go in.deliverAccessKeys(ctx)
 	go deliverUserQuestions(ctx, outbound, store)
 	go deliverMaintenance(ctx, outbound, reports, state.Account.OwnerID)
 	go deliver(ctx, outbound, store, sessions, outputStore, cfg.PublicURL)

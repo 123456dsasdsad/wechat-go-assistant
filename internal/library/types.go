@@ -91,19 +91,21 @@ type Research struct {
 	Problems  []string   `json:"problems"`
 }
 type Request struct {
-	Owner        string    `json:"owner"`
-	Action       string    `json:"action"`
-	Key          string    `json:"key,omitempty"`
-	ID           string    `json:"id,omitempty"`
-	MaterialID   int64     `json:"material_id,omitempty"`
-	Version      int64     `json:"version,omitempty"`
-	Conversation string    `json:"conversation,omitempty"`
-	Collection   string    `json:"collection,omitempty"`
-	Text         string    `json:"text,omitempty"`
-	Topics       []string  `json:"topics,omitempty"`
-	Tags         []string  `json:"tags,omitempty"`
-	Query        string    `json:"query,omitempty"`
-	State        string    `json:"state,omitempty"`
-	Review       *Review   `json:"review,omitempty"`
-	Research     *Research `json:"research,omitempty"`
+	Owner        string           `json:"owner"`
+	Action       string           `json:"action"`
+	Key          string           `json:"key,omitempty"`
+	ID           string           `json:"id,omitempty"`
+	MaterialID   int64            `json:"material_id,omitempty"`
+	Version      int64            `json:"version,omitempty"`
+	Conversation string           `json:"conversation,omitempty"`
+	Collection   string           `json:"collection,omitempty"`
+	Text         string           `json:"text,omitempty"`
+	Topics       []string         `json:"topics,omitempty"`
+	Tags         []string         `json:"tags,omitempty"`
+	Query        string           `json:"query,omitempty"`
+	State        string           `json:"state,omitempty"`
+	Review       *Review          `json:"review,omitempty"`
+	Research     *Research        `json:"research,omitempty"`
+	Branch       *KnowledgeBranch `json:"branch,omitempty"`
+	Annotation   *MapAnnotation   `json:"annotation,omitempty"`
 }

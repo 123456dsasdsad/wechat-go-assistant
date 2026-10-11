@@ -25,6 +25,12 @@ import (
 //go:embed workspace.html
 var workspacePage string
 
+//go:embed knowledge.js
+var knowledgeScript string
+
+//go:embed campus-apps.js
+var campusAppsScript string
+
 type workspaceRequest struct {
 	Action       string                `json:"action"`
 	Source       string                `json:"source"`
@@ -44,6 +50,9 @@ type workspaceRequest struct {
 	Batch        string                `json:"batch"`
 	Question     string                `json:"question"`
 	Library      *library.Request      `json:"library,omitempty"`
+	Scope        string                `json:"scope,omitempty"`
+	Minutes      int                   `json:"minutes,omitempty"`
+	ReadOnly     *bool                 `json:"read_only,omitempty"`
 }
 
 func randomSource() string {
@@ -60,13 +69,26 @@ func (in *inbound) workspaceHandler(statePath string) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		if r.Method == "GET" && (r.URL.Path == "/wechat-files/manage/knowledge.js" || r.URL.Path == "/wechat-files/manage/campus-apps.js" || r.URL.Path == "/wechat-files/manage/access-keys.js") {
+			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+			if strings.HasSuffix(r.URL.Path, "/knowledge.js") {
+				io.WriteString(w, knowledgeScript)
+			} else if strings.HasSuffix(r.URL.Path, "/campus-apps.js") {
+				io.WriteString(w, campusAppsScript)
+			} else {
+				io.WriteString(w, accessKeysScript)
+			}
+			return
+		}
 		if r.Method == "GET" && r.URL.Path == "/wechat-files/manage/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			io.WriteString(w, workspacePage)
 			return
 		}
-		if r.Method != "GET" && (r.Method != "POST" || r.Header.Get("Origin") != origin) {
+		appPath := strings.HasPrefix(r.URL.Path, "/wechat-files/manage/apps/")
+		appWrite := appPath && (r.Method == "PUT" || r.Method == "PATCH" || r.Method == "DELETE")
+		if r.Method != "GET" && r.Method != "HEAD" && ((r.Method != "POST" && !appWrite) || r.Header.Get("Origin") != origin) {
 			http.Error(w, "请求来源不正确。", 403)
 			return
 		}
@@ -108,6 +130,14 @@ func (in *inbound) workspaceHandler(statePath string) http.Handler {
 		owner, ok := in.files.Authorize(cookie.Value)
 		if !ok || owner != in.owner {
 			http.Error(w, "登录已过期。请在微信重新获取管理链接。", 401)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/wechat-files/manage/apps/") {
+			if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && r.Header.Get("Origin") != origin {
+				http.Error(w, "请求来源不正确。", 403)
+				return
+			}
+			in.serveCampusApp(w, r, owner)
 			return
 		}
 		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/wechat-files/manage/file/") {
@@ -285,6 +315,46 @@ func (in *inbound) workspaceSnapshot(owner, query string, archived bool) (map[st
 	return data, nil
 }
 func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath string) (any, error) {
+	if strings.HasPrefix(b.Action, "access_") {
+		if in.access == nil {
+			return nil, errors.New("access_store_unavailable")
+		}
+		switch b.Action {
+		case "access_list":
+			return in.access.List(owner)
+		case "access_show":
+			key, e := in.access.Reveal(owner, b.ID)
+			if e != nil {
+				return nil, errors.New("该 key 尚无加密保存记录，请退出后用原 key 登录一次，或重置长期 key。已撤销和已过期的 key 不能查看。")
+			}
+			return map[string]string{"key": key}, nil
+		case "access_issue":
+			readonly := true
+			if b.ReadOnly != nil {
+				readonly = *b.ReadOnly
+			}
+			scope := b.Scope
+			if scope == "" {
+				scope = "/wechat-files/"
+			}
+			name := b.Name
+			if name == "" {
+				name = "临时访问"
+			}
+			minutes := b.Minutes
+			if minutes == 0 {
+				minutes = 60
+			}
+			g, key, e := in.access.Temporary(owner, name, scope, minutes, readonly)
+			return map[string]any{"grant": g, "key": key}, e
+		case "access_revoke":
+			return map[string]bool{"ok": true}, in.access.Revoke(owner, b.ID)
+		case "access_rotate":
+			g, key, e := in.access.Rotate(owner)
+			return map[string]any{"grant": g, "key": key}, e
+		}
+		return nil, errors.New("unsupported_access_action")
+	}
 	if b.Action == "commands" {
 		return lookupCommands(b.Name, b.Input), nil
 	}
@@ -306,7 +376,14 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 		}
 		q := *b.Library
 		q.Owner = owner
-		allowed := map[string]bool{"search": true, "topics": true, "get": true, "review": true, "snapshot": true, "move": true, "tags": true, "trash": true, "restore": true, "notes": true, "lock": true, "import": true, "restore_review": true}
+		if q.Action == "site_list" || q.Action == "site_add" || q.Action == "site_remove" || q.Action == "site_check" {
+			var result any
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			e := in.library.Call(ctx, q, &result)
+			return result, e
+		}
+		allowed := map[string]bool{"map": true, "map_branch": true, "map_annotation": true, "search": true, "topics": true, "get": true, "review": true, "snapshot": true, "move": true, "tags": true, "trash": true, "restore": true, "notes": true, "lock": true, "import": true, "restore_review": true}
 		if !allowed[q.Action] {
 			return nil, errors.New("unsupported_library_action")
 		}
@@ -368,6 +445,14 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 	case "library_update":
 		j, e := in.queueLibrary(owner, reply, "portal:"+b.Source, "review_update", b.Name, "更新类别综述")
 		return map[string]any{"id": j.ID, "ok": e == nil}, e
+	case "direction_task":
+		if in.library == nil || b.Library == nil {
+			return nil, errors.New("library_unavailable")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		j, e := in.directionTask(ctx, owner, reply, b.Source, b.Library.Collection, b.Library.Key)
+		return map[string]any{"ok": e == nil, "id": j.ID, "conversation": j.ConversationID}, e
 	case "task":
 		cid := b.Conversation
 		if cid == "" {
@@ -480,6 +565,10 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 	return nil, errors.New("unknown_action")
 }
 func workspaceError(e error) string {
+	appErrors := map[string]string{"campus_app_requires_local_http_address": "请输入校园服务器本机HTTP地址，并包含端口，例如 http://127.0.0.1:8765。", "campus_app_unreachable": "校园地址无法连接，请先确认应用已经启动。", "campus_app_server_error": "校园应用返回服务错误，请先检查应用日志。", "invalid_campus_app_title": "请填写应用名称，长度不超过240字节。", "campus_app_limit_reached": "已达到30个应用，请先停止不再使用的转发。", "library_snapshot_stale": "资料已更新，请刷新知识树，等待该分支重新整理后再创建研究任务。"}
+	if message := appErrors[e.Error()]; message != "" {
+		return message
+	}
 	messages := map[string]string{"file_in_active_task": "文件正用于排队或运行的任务，请结束任务后删除。", "invalid_profile": "项目目录请使用相对路径，预算需为非负数。", "reply_context_unavailable": "微信回复凭证暂不可用，请先在微信发送一条消息。", "switch_conversation_before_archiving_current": "请先切换到其他会话，再归档当前会话。", "only_failed_tasks_can_retry": "只有失败或已停止的任务可重试。", "file_storage_full": "服务器磁盘空间不足，请先清理文件。"}
 	if v := messages[e.Error()]; v != "" {
 		return v

@@ -15,10 +15,14 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/library"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 )
 
 func (in *inbound) libraryCommand(ctx context.Context, msg weixin.Message, input, quoted string, refs []files.Ref, media []weixin.Item) (bool, error) {
+	if handled, e := in.mapCommand(ctx, msg, input); handled {
+		return handled, e
+	}
 	command := false
 	for _, p := range []string{"资料库", "本会话资料库", "开始收录", "完成收录", "取消收录", "继续收录", "收录到", "收录备注", "研究这组截图", "研究主题", "查资料", "资料 ", "文献 ", "方法 ", "综述", "更新综述", "补查文献", "移动资料", "删除资料", "恢复资料", "资料标签", "导出综述"} {
 		if strings.HasPrefix(input, p) {
@@ -318,7 +322,8 @@ func (in *inbound) queueLibrary(owner, reply, key, kind, target, input string, c
 			c = selected
 		}
 	}
-	return in.queue.EnqueueLibrary(key, input, owner, reply, kind, target, in.preferences.Current(c.ID), c.Profile.BudgetUSD)
+	choice := models.Choice{Model: "gpt-6.1-sol", Effort: "high"}
+	return in.queue.EnqueueLibrary(key, input, owner, reply, kind, target, choice, c.Profile.BudgetUSD)
 }
 func (in *inbound) libraryAck(j jobs.Job) string {
 	text := "已安排资料研究与综述更新，任务 " + j.ID[:8] + "。所有关联类别都会更新。"
@@ -403,6 +408,14 @@ func (in *inbound) libraryRetry(ctx context.Context, statePath string) {
 			for _, t := range ts {
 				if t.Dirty && t.LastError == "" {
 					pendingTopics = append(pendingTopics, t)
+				}
+			}
+			var knowledge library.KnowledgeMap
+			if in.library.Call(ctx, library.Request{Owner: in.owner, Action: "map"}, &knowledge) == nil {
+				for _, status := range knowledge.Branches {
+					if status.Dirty && !status.Topic.Dirty && status.LastError == "" {
+						pendingTopics = append(pendingTopics, status.Topic)
+					}
 				}
 			}
 			if len(pendingTopics) > 0 {

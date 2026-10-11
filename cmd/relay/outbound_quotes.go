@@ -39,6 +39,9 @@ func withoutLinkCredentials(text string) string {
 }
 func quoteRecorder(cache *quotes.Store, bot string, queue *jobs.Store) func(weixin.Reply, weixin.SendResult, string, bool) {
 	return func(reply weixin.Reply, accepted weixin.SendResult, text string, media bool) {
+		if strings.HasPrefix(reply.ClientID, "go-access-") {
+			return
+		}
 		if strings.HasPrefix(reply.ClientID, "go-question-") {
 			parts := strings.Split(strings.TrimPrefix(reply.ClientID, "go-question-"), "-")
 			if len(parts) == 2 {

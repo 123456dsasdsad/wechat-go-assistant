@@ -49,6 +49,14 @@ func Open(root string) (*Store, error) {
 		`CREATE INDEX IF NOT EXISTS terms_lookup ON terms(owner,term,material)`,
 		`CREATE TABLE IF NOT EXISTS material_versions(owner TEXT,id INTEGER,revision INTEGER,document BLOB,PRIMARY KEY(owner,id,revision))`,
 		`CREATE TABLE IF NOT EXISTS research(owner TEXT,intake TEXT,document BLOB,PRIMARY KEY(owner,intake))`,
+		`CREATE TABLE IF NOT EXISTS knowledge_branches(owner TEXT,topic TEXT,version INTEGER,corpus_revision INTEGER,review_version INTEGER,error TEXT DEFAULT '',document BLOB,PRIMARY KEY(owner,topic))`,
+		`CREATE TABLE IF NOT EXISTS knowledge_versions(owner TEXT,topic TEXT,version INTEGER,document BLOB,PRIMARY KEY(owner,topic,version))`,
+		`CREATE TABLE IF NOT EXISTS knowledge_nodes(owner TEXT,topic TEXT,key TEXT,parent TEXT,kind TEXT,title TEXT,document BLOB,PRIMARY KEY(owner,topic,key))`,
+		`CREATE TABLE IF NOT EXISTS knowledge_evidence(owner TEXT,topic TEXT,node TEXT,material INTEGER,source INTEGER,locator TEXT,excerpt TEXT,PRIMARY KEY(owner,topic,node,material,source,locator,excerpt))`,
+		`CREATE INDEX IF NOT EXISTS knowledge_evidence_material ON knowledge_evidence(owner,material)`,
+		`CREATE TABLE IF NOT EXISTS knowledge_links(owner TEXT,topic TEXT,key TEXT,target_topic TEXT,kind TEXT,document BLOB,PRIMARY KEY(owner,topic,key))`,
+		`CREATE TABLE IF NOT EXISTS knowledge_annotations(owner TEXT,topic TEXT,key TEXT,document BLOB,PRIMARY KEY(owner,topic,key))`,
+		`CREATE TABLE IF NOT EXISTS campus_apps(owner TEXT,id TEXT,title TEXT,upstream TEXT,document BLOB,PRIMARY KEY(owner,id),UNIQUE(owner,upstream))`,
 	} {
 		if _, err = db.Exec(q); err != nil {
 			db.Close()

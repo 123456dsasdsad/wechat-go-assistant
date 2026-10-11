@@ -94,6 +94,9 @@ func topics(m Material) []string {
 }
 func dirty(tx *sql.Tx, owner, name string) error {
 	_, e := tx.Exec(`INSERT INTO topics(owner,name,revision,dirty) VALUES(?,?,1,1) ON CONFLICT(owner,name) DO UPDATE SET revision=revision+1,dirty=1,error=''`, owner, name)
+	if e == nil {
+		_, e = tx.Exec("UPDATE knowledge_branches SET error='' WHERE owner=? AND topic=?", owner, name)
+	}
 	return e
 }
 func (s *Store) SaveResearch(owner, iid string, r Research) ([]Material, error) {

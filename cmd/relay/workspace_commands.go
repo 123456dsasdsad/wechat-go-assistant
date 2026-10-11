@@ -44,7 +44,7 @@ func (in *inbound) enqueue(source, input, owner, reply, cid string, refs []files
 func (in *inbound) workspaceCommand(ctx context.Context, msg weixin.Message, input string) (bool, error) {
 	reply := func(s string) (bool, error) { return true, in.reply(ctx, msg, "workspace", s) }
 	switch input {
-	case "管理页面", "手机管理", "控制台":
+	case "管理页面", "手机管理", "控制台", "校园应用":
 		if in.publicURL == "" {
 			return reply("手机管理页尚未配置。")
 		}

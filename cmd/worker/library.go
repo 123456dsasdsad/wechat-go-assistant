@@ -160,6 +160,11 @@ func runLibraryTask(ctx context.Context, cfg config, task jobs.Task, relayKey, a
 	if e == nil {
 		updated, e = r.reviews()
 	}
+	if e == nil {
+		var maps []string
+		maps, e = r.maps()
+		updated = append(updated, maps...)
+	}
 	completion.Usage = r.total
 	completion.ToolCount = r.tools
 	if e != nil {
@@ -183,7 +188,7 @@ func runLibraryTask(ctx context.Context, cfg config, task jobs.Task, relayKey, a
 		b.WriteString("已有证据无变化，未重复生成。")
 	}
 	b.WriteString(strings.Join(updated, "\n"))
-	b.WriteString("\n\n发送“综述列表”查看所有类别；“综述 类别”查看最新综述；手机管理页可查看文献、证据与版本。")
+	b.WriteString("\n\n发送“知识树”打开研究地图；“研究方向 类别”查看候选方向；“综述 类别”查看综述。手机管理页可查看原文依据、实验方案和历史版本。")
 	completion.Result = b.String()
 	return completion
 }

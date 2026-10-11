@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/accesskeys"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/accountupload"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/assistant"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
@@ -30,6 +31,7 @@ type messageClient interface {
 	Download(context.Context, weixin.Item) ([]byte, error)
 }
 type inbound struct {
+	access           *accesskeys.Store
 	client           messageClient
 	preferences      *settings.Store
 	queue            *jobs.Store

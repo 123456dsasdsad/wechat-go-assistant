@@ -20,6 +20,42 @@ func (s *Store) Action(q Request) (any, error) {
 		return nil, errors.New("owner_required")
 	}
 	switch q.Action {
+	case "site_list":
+		return s.CampusApps(q.Owner)
+	case "site_add":
+		return s.AddCampusApp(context.Background(), q.Owner, q.Collection, q.Text)
+	case "site_remove":
+		return map[string]bool{"ok": true}, s.RemoveCampusApp(q.Owner, q.ID)
+	case "site_check":
+		return s.CheckCampusApp(context.Background(), q.Owner, q.ID)
+	case "map":
+		return s.Map(q.Owner)
+	case "map_branch":
+		return s.MapBranch(q.Owner, q.Collection, q.Version)
+	case "map_snapshot":
+		return s.MapSnapshot(q.Owner, q.Collection)
+	case "map_publish":
+		if q.Branch == nil {
+			return nil, errors.New("map_branch_required")
+		}
+		snap, e := s.MapSnapshot(q.Owner, q.Collection)
+		if e != nil {
+			return nil, e
+		}
+		if snap.Previous.Version != q.Version || snap.Snapshot.Topic.Revision != q.Branch.CorpusRevision || snap.Snapshot.Topic.Version != q.Branch.ReviewVersion {
+			return nil, ErrStale
+		}
+		return s.PublishMap(q.Owner, snap, *q.Branch)
+	case "map_annotation":
+		if q.Annotation == nil {
+			return nil, errors.New("map_annotation_required")
+		}
+		return map[string]bool{"ok": true}, s.AnnotateMap(q.Owner, q.Collection, q.Key, *q.Annotation)
+	case "map_prompt":
+		p, e := s.DirectionPrompt(q.Owner, q.Collection, q.Key)
+		return map[string]string{"prompt": p}, e
+	case "map_error":
+		return map[string]bool{"ok": true}, s.MapError(q.Owner, q.Collection, q.Text)
 	case "begin":
 		return s.Begin(q.Owner, q.Key, q.Conversation, q.Collection)
 	case "active":
@@ -86,6 +122,10 @@ func Handler(s *Store, key string) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		if len(key) < 32 || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+key)) != 1 {
 			http.Error(w, "unauthorized", 401)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/library/app/") {
+			s.serveCampusApp(w, r)
 			return
 		}
 		if r.URL.Path == "/library/health" {
