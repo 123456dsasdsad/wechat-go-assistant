@@ -1,5 +1,6 @@
 export const nav = [
   { id:'overview', label:'项目总览', icon:'grid' },
+  { id:'learn', label:'写作入门', icon:'book' },
   { id:'library', label:'文献资料', icon:'book' },
   { id:'ideas', label:'问题与假设', icon:'bulb' },
   { id:'experiments', label:'实验与证据', icon:'flask' },

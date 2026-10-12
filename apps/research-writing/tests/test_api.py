@@ -126,5 +126,103 @@ class APITest(unittest.TestCase):
         finally:
             c.close()
 
+    def test_beginner_course_waits_for_answer_and_unlocks_only_after_correct_practice(self):
+        root='projects/'+self.pid+'/'
+        first=self.call(root+'learning')[1]
+        self.assertEqual(first['completed'],[])
+        self.assertNotIn('answer',first['lessons'][0])
+        code,_=self.call(root+'learn',{'lesson_id':'one-question','answer':'an answer','request_id':'skip'})
+        self.assertEqual(code,400)
+        self.call(root+'learn',{'lesson_id':'paper-purpose','answer':'layout','request_id':'wrong'})
+        self.assertEqual(self.call(root+'learning')[1]['completed'],[])
+        right={'lesson_id':'paper-purpose','answer':'question','request_id':'right'}
+        self.call(root+'learn',right);self.call(root+'learn',right)
+        course=self.call(root+'learning')[1]
+        self.assertEqual(course['completed'],['paper-purpose'])
+        self.assertEqual(course['current'],'paper-purpose')
+        self.assertEqual(len(course['attempts']),2)
+        self.call(root+'learn',{'action':'select','lesson_id':'one-question'})
+        self.assertEqual(self.call(root+'learning')[1]['current'],'one-question')
+
+    def test_tutor_context_is_independent_and_question_cannot_mark_lesson_complete(self):
+        from learning_worker import tick_learning
+        root='projects/'+self.pid+'/'
+        self.call(root+'learn',{'lesson_id':'paper-purpose','answer':'question','request_id':'first-lesson'})
+        self.call(root+'experiments',{'rq':'UNRELATED_PRIVATE_EXPERIMENT','result':'foreign task context'})
+        self.call(root+'learn',{'lesson_id':'one-question','intent':'question','answer':'研究问题与主题有何区别？','request_id':'help'})
+        a=self.call(root+'learning')[1]['attempts'][0]
+        input_path=repo.DB.parent/'writing-tutor'/(a['id']+'.input.json')
+        raw=input_path.read_text(encoding='utf-8')
+        self.assertNotIn('UNRELATED_PRIVATE_EXPERIMENT',raw)
+        self.assertNotIn('foreign task context',raw)
+        c=repo.connect();c.execute("UPDATE learning_attempts SET state='running',job_id='test-job' WHERE id=?",(a['id'],));c.commit();c.close()
+        feedback={'request_id':a['id'],'lesson_id':a['lesson_id'],'passed':True,'feedback':'一个是领域，一个是要回答的问题。','example':'教学例子','next_tip':'试着写出自己的问题。'}
+        (repo.DB.parent/'writing-tutor'/(a['id']+'.report.json')).write_text(json.dumps(feedback,ensure_ascii=False),encoding='utf-8')
+        tick_learning(object())
+        course=self.call(root+'learning')[1]
+        self.assertFalse(course['attempts'][0]['feedback']['passed'])
+        self.assertEqual(course['completed'],['paper-purpose'])
+        self.assertEqual(course['current'],'one-question')
+
+    def test_tutor_text_feedback_persists_without_browser_and_does_not_duplicate(self):
+        from learning_worker import tick_learning
+        root='projects/'+self.pid+'/'
+        self.call(root+'learn',{'lesson_id':'paper-purpose','answer':'question','request_id':'first'})
+        self.call(root+'learn',{'lesson_id':'one-question','answer':'同条件下比较两种杯子的温度变化。','request_id':'practice'})
+        a=self.call(root+'learning')[1]['attempts'][0]
+        c=repo.connect();c.execute("UPDATE learning_attempts SET state='running',job_id='test-job' WHERE id=?",(a['id'],));c.commit();c.close()
+        report={'request_id':a['id'],'lesson_id':a['lesson_id'],'passed':True,'feedback':'问题已经清楚。','example':'示例','next_tip':'由你决定是否进入下一课。'}
+        (repo.DB.parent/'writing-tutor'/(a['id']+'.report.json')).write_text(json.dumps(report),encoding='utf-8')
+        tick_learning(object());tick_learning(object())
+        course=self.call(root+'learning')[1]
+        self.assertEqual(len(course['completed']),2)
+        self.assertEqual(course['attempts'][0]['state'],'completed')
+        self.assertEqual(course['attempts'][0]['answer'],'同条件下比较两种杯子的温度变化。')
+
+    def test_overloaded_delivered_tutor_job_retries_once_then_fails_visibly(self):
+        from learning_worker import tick_learning
+        root='projects/'+self.pid+'/'
+        self.call(root+'learn',{'lesson_id':'paper-purpose','answer':'question','request_id':'first'})
+        self.call(root+'learn',{'lesson_id':'one-question','answer':'比较杯子温度变化','request_id':'overload'})
+        a=self.call(root+'learning')[1]['attempts'][0]
+        c=repo.connect();c.execute("UPDATE learning_attempts SET state='running',job_id='job' WHERE id=?",(a['id'],));c.commit();c.close()
+        class Overloaded:
+            def snapshot(self,query):
+                return {'tasks':[{'id':'job','state':'delivered','error':'codex_server_overloaded'}]}
+        tick_learning(Overloaded())
+        attempt=self.call(root+'learning')[1]['attempts'][0]
+        self.assertEqual(attempt['state'],'creating')
+        self.assertEqual(attempt['fallback_count'],1)
+        c=repo.connect();c.execute("UPDATE learning_attempts SET state='running',job_id='job' WHERE id=?",(a['id'],));c.commit();c.close()
+        tick_learning(Overloaded())
+        attempt=self.call(root+'learning')[1]['attempts'][0]
+        self.assertEqual(attempt['state'],'failed')
+        self.assertTrue(attempt['error'])
+        self.assertEqual(attempt['answer'],'比较杯子温度变化')
+
+    def test_tutor_waits_for_corrected_intermediate_json(self):
+        from learning_worker import tick_learning,recover_feedback
+        root='projects/'+self.pid+'/'
+        self.call(root+'learn',{'lesson_id':'paper-purpose','answer':'question','request_id':'first'})
+        self.call(root+'learn',{'lesson_id':'one-question','answer':'比较杯子温度变化','request_id':'correction'})
+        a=self.call(root+'learning')[1]['attempts'][0]
+        c=repo.connect();c.execute("UPDATE learning_attempts SET state='running',job_id='job' WHERE id=?",(a['id'],));c.commit();c.close()
+        path=repo.DB.parent/'writing-tutor'/(a['id']+'.report.json')
+        path.write_text('{"passed":true}invalid intermediate content',encoding='utf-8')
+        class Running:
+            def snapshot(self,query):
+                return {'tasks':[{'id':'job','state':'running','error':''}]}
+        tick_learning(Running())
+        self.assertEqual(self.call(root+'learning')[1]['attempts'][0]['state'],'running')
+        # Simulate an older service's premature failure, then a corrected output.
+        c=repo.connect();c.execute("UPDATE learning_attempts SET state='failed',error='Extra data' WHERE id=?",(a['id'],));c.commit();c.close()
+        report={'request_id':a['id'],'lesson_id':a['lesson_id'],'passed':True,'feedback':'入门目标已表达清楚。','example':'','next_tip':'等你决定下一步。'}
+        path.write_text(json.dumps(report,ensure_ascii=False),encoding='utf-8')
+        recover_feedback()
+        row=self.call(root+'learning')[1]['attempts'][0]
+        self.assertEqual(row['state'],'completed')
+        self.assertEqual(row['error'],'')
+        self.assertEqual(self.call(root+'learning')[1]['current'],'one-question')
+
 if __name__ == '__main__':
     unittest.main()

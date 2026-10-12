@@ -13,6 +13,7 @@ const draft=computed(()=>props.data.drafts.find(x=>x.content?.trim()))
 const pending=computed(()=>props.reports.reduce((n,r)=>n+r.issues.length-r.resolved.length,0))
 </script>
 <template>
+  <section class="panel beginner-banner"><div><span class="section-label">第一次写论文？从这里开始</span><h2>先学会表达一个问题，再写第一小段。</h2><p>每次只学一个概念，做一个小练习。导师等你回答，再给反馈。</p></div><button class="button primary" @click="emit('go','learn')">开始学写论文<Icon name="arrow" :size="17"/></button></section>
   <div class="stage-track" aria-label="研究阶段"><button v-for="(s,i) in data.stages" :key="s" class="stage" :class="{done:i+1<data.project.stage,active:i+1===data.project.stage}" @click="emit('stage',i+1)"><span class="stage-dot"><Icon v-if="i+1<data.project.stage" name="check" :size="10"/><template v-else>{{i+1}}</template></span>{{s}}<i v-if="i<7"></i></button></div>
   <div class="overview-grid"><div class="overview-main">
     <section class="panel argument-panel"><div class="panel-heading"><div><span class="section-label">研究主线</span><h2>让问题、方法与证据连起来</h2></div><span class="subtle-label">当前论证链</span></div><p class="research-question"><span>RQ</span>{{data.problems[0]?.phenomenon||'先记录你想解释的现象，再形成研究假设。'}}</p><div class="argument-chain"><button v-for="(step,i) in chain" :key="step.label" @click="step.view==='writing'?emit('write'):emit('go',step.view)"><span class="chain-step">{{step.label}}</span><b>{{step.title}}</b><small>{{step.hint}}</small><Icon v-if="i<3" name="chevron" :size="14"/></button></div><div class="chain-footer"><Icon name="link" :size="15"/>点击环节，查看本项目的真实记录</div></section>

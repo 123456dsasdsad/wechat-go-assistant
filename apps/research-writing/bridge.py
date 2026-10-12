@@ -127,7 +127,7 @@ def tick(gateway):
                 task = next((t for t in snap.get('tasks', []) if t['id'] == job['job_id']), None)
                 if task:
                     state = task['state']
-                    if state in ['failed', 'cancelled', 'completed']:
+                    if state in ['failed', 'cancelled', 'completed', 'delivered']:
                         error = 'AI 任务未生成有效评审文件，请重试' if state == 'completed' else 'AI 评审任务失败或已停止，请查看任务详情'
                         c.execute("UPDATE ai_reviews SET state='failed',error=?,progress=?,link=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (error, task.get('progress', '')[-12000:], task.get('link', ''), job['id']))
                     else:
@@ -143,17 +143,23 @@ def start_worker():
         gateway = None
         while True:
             try:
+                from learning_worker import recover_feedback
+                recover_feedback()
                 with closing(repo.connect()) as c:
                     active = c.execute("SELECT 1 FROM ai_reviews WHERE state IN ('creating','queued','running') LIMIT 1").fetchone()
+                    active = active or c.execute("SELECT 1 FROM learning_attempts WHERE state IN ('creating','queued','running') LIMIT 1").fetchone()
                 if active:
                     if gateway is None:
                         gateway = Gateway()
                     tick(gateway)
+                    from learning_worker import tick_learning
+                    tick_learning(gateway)
                 elif gateway is not None:
                     gateway.close(); gateway = None
             except Exception:
                 with closing(repo.connect()) as c, c:
                     c.execute("UPDATE ai_reviews SET progress='校园任务通道暂时不可用，正在重试。',updated_at=CURRENT_TIMESTAMP WHERE state IN ('creating','queued','running')")
+                    c.execute("UPDATE learning_attempts SET progress='导师连接暂时不可用，正在重试。你的回答已保存。',updated_at=CURRENT_TIMESTAMP WHERE state IN ('creating','queued','running')")
                 if gateway is not None:
                     gateway.close(); gateway = None
                 # Network errors are retried. Credentials and task contents never enter logs.

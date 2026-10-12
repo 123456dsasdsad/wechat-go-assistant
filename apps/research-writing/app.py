@@ -58,9 +58,16 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(row)
             parts = url.path.strip('/').split('/')
             if len(parts) in [3, 4] and parts[:2] == ['api', 'projects']:
+                if len(parts) == 4 and parts[3] == 'learning':
+                    repo.get_project(c, parts[2])
+                    from tutor import snapshot
+                    return self.send_json(snapshot(c, parts[2]))
                 data = repo.get_project(c, parts[2])
                 if len(parts) == 4 and parts[3] != 'export':
                     return self.send_json({'error': '接口不存在'}, 404)
+                if len(parts)==4:
+                    from tutor import snapshot
+                    data['learning']=snapshot(c,parts[2],full=True)
                 return self.send_json(data)
             return self.send_json({'error': '接口不存在'}, 404)
         except KeyError:
@@ -104,6 +111,9 @@ class Handler(SimpleHTTPRequestHandler):
                 c.execute('UPDATE projects SET title=?,field=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', (title, str(body.get('field', project['field']))[:1000], pid))
             elif kind == 'stage':
                 c.execute('UPDATE projects SET stage=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', (max(1, min(8, int(body.get('stage', 1)))), pid))
+            elif kind == 'learn':
+                from tutor import submit
+                result = submit(c, pid, body)
             elif kind == 'archive':
                 c.execute('UPDATE projects SET archived=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', (int(bool(body.get('archived', True))), pid))
             elif kind in ['drafts', 'chapter-review', 'ai-review']:

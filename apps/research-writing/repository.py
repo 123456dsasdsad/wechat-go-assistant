@@ -37,6 +37,7 @@ def initialize():
         for table, name, definition in [
             ('projects', 'archived', 'INTEGER NOT NULL DEFAULT 0'),
             ('projects', 'ai_conversation', "TEXT NOT NULL DEFAULT ''"),
+            ('projects', 'learning_conversation', "TEXT NOT NULL DEFAULT ''"),
             ('drafts', 'revision', 'INTEGER NOT NULL DEFAULT 0'),
             ('draft_versions', 'revision', 'INTEGER NOT NULL DEFAULT 0'),
             ('draft_versions', 'request_id', 'TEXT'),
@@ -57,6 +58,8 @@ def initialize():
           created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
           request_id TEXT NOT NULL, UNIQUE(project_id,request_id));
         ''')
+        from tutor import setup
+        setup(c)
         if not c.execute('SELECT 1 FROM projects LIMIT 1').fetchone():
             c.execute('INSERT INTO projects(id,title,field) VALUES(?,?,?)',
                       (new_id(), '我的第一个研究项目', '待填写研究方向'))
