@@ -93,6 +93,11 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		}
 	}
 	input := strings.TrimSpace(strings.Join(texts, "\n"))
+	if len(media) == 0 && len(msg.Sources) == 0 {
+		if handled, e := in.accessKeyCommand(ctx, msg, input); handled {
+			return e
+		}
+	}
 	if accessKeyInMessage.MatchString(input) {
 		return in.reply(ctx, msg, "access-input", "这是网页访问 key，请在网页的“访问 key”输入框中使用。为避免泄露，这条消息不会保存为任务、引用资料或发送给 AI。")
 	}

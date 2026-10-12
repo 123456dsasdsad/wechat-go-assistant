@@ -26,6 +26,63 @@ func TestAccessKeyMessagesNeverEnterAITaskQueue(t *testing.T) {
 	}
 }
 
+func TestWeChatOwnerRetrievesCurrentKeyWithoutBrowserSessionOrAITask(t *testing.T) {
+	defer metadb.CloseAll()
+	in := inboundFixture(t)
+	s, e := accesskeys.Open(t.TempDir(), strings.Repeat("s", 64))
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { s.Close() })
+	in.access = s
+	g, key, e := s.Rotate(in.owner)
+	if e != nil {
+		t.Fatal(e)
+	}
+	current := in.sessions.Current().ID
+	cookie, _, e := s.Session(g)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = s.EndSession(cookie); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.AuthorizeSession(cookie); e == nil {
+		t.Fatal("ended browser session accepted")
+	}
+	for _, input := range []string{"获取长期key", " 获取 长期 KEY。 ", "key过期了", "找回key"} {
+		if e := in.handle(context.Background(), textMessage(input, input)); e != nil {
+			t.Fatal(e)
+		}
+		if !strings.Contains(in.client.(*fakeMessages).text, key) {
+			t.Fatal("current key not returned")
+		}
+	}
+	if len(in.queue.History()) != 0 || in.sessions.Current().ID != current {
+		t.Fatal("key retrieval changed AI tasks or current conversation")
+	}
+	active, created, e := s.EnsurePrimary(in.owner)
+	if e != nil || created || active.ID != g.ID {
+		t.Fatal("key retrieval rotated the key")
+	}
+	for _, input := range []string{"请解释key过期的原因", "获取长期key然后删除文件", "请分析这个key"} {
+		if wantsAccessKey(input) {
+			t.Fatal("ordinary request mistaken for credential command")
+		}
+	}
+	for _, other := range []struct{ owner, group string }{{"other", ""}, {"owner", "group"}} {
+		in.client.(*fakeMessages).text = ""
+		msg := textMessage("untrusted", "获取长期key")
+		msg.FromUserID, msg.GroupID = other.owner, other.group
+		if e := in.handle(context.Background(), msg); e != nil {
+			t.Fatal(e)
+		}
+		if in.client.(*fakeMessages).text != "" {
+			t.Fatal("credential revealed outside owner direct chat")
+		}
+	}
+}
+
 func accessFixture(t *testing.T) (*inbound, http.Handler) {
 	t.Helper()
 	s, e := accesskeys.Open(t.TempDir(), strings.Repeat("s", 64))

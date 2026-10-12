@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/accesskeys"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
@@ -22,7 +23,45 @@ var accessKeysScript string
 
 var accessKeyInMessage = regexp.MustCompile(`wxk_[A-Za-z0-9_-]{43}`)
 
-var accessPage = template.Must(template.New("access").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>校园助手 · 访问验证</title><style>body{margin:0;background:#eef4f8;color:#253549;font:16px/1.7 system-ui,sans-serif}main{max-width:440px;margin:12vh auto;padding:28px;background:white;border:1px solid #d8e3eb;border-radius:12px}h1{font-size:24px}input,button{box-sizing:border-box;width:100%;font:inherit;padding:12px;border-radius:7px;border:1px solid #d8e3eb}button{margin-top:18px;background:#087e8b;color:white;cursor:pointer}input:focus-visible,button:focus-visible{outline:3px solid #087e8b;outline-offset:3px}p{color:#53697b}@media(max-width:520px){main{margin:8vh 18px;padding:22px}}</style><main><h1>校园助手 · 访问验证</h1><p>请输入微信助手发给你的访问 key。临时 key 的范围和有效期由创建者设置。</p><form method="post" action="/wechat-files/access/login"><label for="key">访问 key</label><input id="key" name="key" type="password" autocomplete="off" required maxlength="128"><input type="hidden" name="return" value="{{.Return}}"><button>验证并继续</button></form><p>长期 key 可在管理页重置。验证成功后，当前浏览器最多保持登录 30 天。</p><p id="access-error" role="alert"></p></main><script nonce="{{.Nonce}}">const f=document.querySelector("form"),err=document.querySelector("#access-error"),btn=f.querySelector("button");f.addEventListener("submit",async e=>{e.preventDefault();btn.disabled=true;err.textContent="正在验证…";try{const r=await fetch(f.action,{method:"POST",body:new URLSearchParams(new FormData(f))});if(!r.ok){err.textContent=await r.text();return}f.elements.key.value="";location.replace(r.url)}catch(e){err.textContent="连接暂时中断，请重试。"}finally{btn.disabled=false}});</script></html>`))
+func wantsAccessKey(input string) bool {
+	command := strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, strings.Trim(input, " /。！？?!：:"))
+	switch command {
+	case "key", "长期key", "访问key", "网页key", "获取key", "获取长期key", "获取访问key", "查看key", "查看长期key", "找回key", "重新获取key", "重新获取长期key", "key过期了", "key过期", "key失效":
+		return true
+	}
+	return false
+}
+
+// WeChat owner authentication is independent of browser key/session expiry.
+// Run before question routing and material capture; never send credentials to AI.
+func (in *inbound) accessKeyCommand(ctx context.Context, msg weixin.Message, input string) (bool, error) {
+	if !wantsAccessKey(input) {
+		return false, nil
+	}
+	reply := func(text string) (bool, error) { return true, in.reply(ctx, msg, "access-key", text) }
+	if msg.FromUserID != in.owner || msg.GroupID != "" || msg.Type != 1 {
+		return true, nil
+	}
+	if in.access == nil {
+		return reply("网页访问 key 尚未配置。")
+	}
+	g, _, e := in.access.EnsurePrimary(in.owner)
+	if e != nil {
+		return reply("长期 key 暂时无法读取，请稍后再次发送“获取长期key”。")
+	}
+	raw, e := in.access.Reveal(in.owner, g.ID)
+	if e != nil {
+		return reply("长期 key 暂时无法读取，请联系管理员恢复。此操作不会创建 AI 任务。")
+	}
+	return reply("当前长期访问 key：\n\n" + raw + "\n\n长期 key 本身没有自动到期时间；临时 key 或浏览器登录过期后，可用它重新验证。请粘贴到网页验证框，不要转发给他人。\n管理页面：" + in.publicURL + "manage/\n此指令不调用 AI，也不更改当前会话或已有 key。")
+}
+
+var accessPage = template.Must(template.New("access").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>校园助手 · 访问验证</title><style>body{margin:0;background:#eef4f8;color:#253549;font:16px/1.7 system-ui,sans-serif}main{max-width:440px;margin:12vh auto;padding:28px;background:white;border:1px solid #d8e3eb;border-radius:12px}h1{font-size:24px}input,button{box-sizing:border-box;width:100%;font:inherit;padding:12px;border-radius:7px;border:1px solid #d8e3eb}button{margin-top:18px;background:#087e8b;color:white;cursor:pointer}input:focus-visible,button:focus-visible{outline:3px solid #087e8b;outline-offset:3px}p{color:#53697b}@media(max-width:520px){main{margin:8vh 18px;padding:22px}}</style><main><h1>校园助手 · 访问验证</h1><p>请输入微信助手发给你的访问 key。临时 key 的范围和有效期由创建者设置。</p><form method="post" action="/wechat-files/access/login"><label for="key">访问 key</label><input id="key" name="key" type="password" autocomplete="off" required maxlength="128"><input type="hidden" name="return" value="{{.Return}}"><button>验证并继续</button></form><p>长期 key 可在管理页重置。忘记 key 或临时 key 过期？在绑定的微信助手会话发送“获取长期key”。验证成功后，当前浏览器最多保持登录 30 天。</p><p id="access-error" role="alert"></p></main><script nonce="{{.Nonce}}">const f=document.querySelector("form"),err=document.querySelector("#access-error"),btn=f.querySelector("button");f.addEventListener("submit",async e=>{e.preventDefault();btn.disabled=true;err.textContent="正在验证…";try{const r=await fetch(f.action,{method:"POST",body:new URLSearchParams(new FormData(f))});if(!r.ok){err.textContent=await r.text();return}f.elements.key.value="";location.replace(r.url)}catch(e){err.textContent="连接暂时中断，请重试。"}finally{btn.disabled=false}});</script></html>`))
 
 func (in *inbound) accessCookies(w http.ResponseWriter, g accesskeys.Grant) error {
 	raw, expires, e := in.access.Session(g)
