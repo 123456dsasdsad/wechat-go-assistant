@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 
 //go:embed access-keys.js
 var accessKeysScript string
+
+var accessKeyInMessage = regexp.MustCompile(`wxk_[A-Za-z0-9_-]{43}`)
 
 var accessPage = template.Must(template.New("access").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>校园助手 · 访问验证</title><style>body{margin:0;background:#eef4f8;color:#253549;font:16px/1.7 system-ui,sans-serif}main{max-width:440px;margin:12vh auto;padding:28px;background:white;border:1px solid #d8e3eb;border-radius:12px}h1{font-size:24px}input,button{box-sizing:border-box;width:100%;font:inherit;padding:12px;border-radius:7px;border:1px solid #d8e3eb}button{margin-top:18px;background:#087e8b;color:white;cursor:pointer}input:focus-visible,button:focus-visible{outline:3px solid #087e8b;outline-offset:3px}p{color:#53697b}@media(max-width:520px){main{margin:8vh 18px;padding:22px}}</style><main><h1>校园助手 · 访问验证</h1><p>请输入微信助手发给你的访问 key。临时 key 的范围和有效期由创建者设置。</p><form method="post" action="/wechat-files/access/login"><label for="key">访问 key</label><input id="key" name="key" type="password" autocomplete="off" required maxlength="128"><input type="hidden" name="return" value="{{.Return}}"><button>验证并继续</button></form><p>长期 key 可在管理页重置。验证成功后，当前浏览器最多保持登录 30 天。</p><p id="access-error" role="alert"></p></main><script nonce="{{.Nonce}}">const f=document.querySelector("form"),err=document.querySelector("#access-error"),btn=f.querySelector("button");f.addEventListener("submit",async e=>{e.preventDefault();btn.disabled=true;err.textContent="正在验证…";try{const r=await fetch(f.action,{method:"POST",body:new URLSearchParams(new FormData(f))});if(!r.ok){err.textContent=await r.text();return}f.elements.key.value="";location.replace(r.url)}catch(e){err.textContent="连接暂时中断，请重试。"}finally{btn.disabled=false}});</script></html>`))
 

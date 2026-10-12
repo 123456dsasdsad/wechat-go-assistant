@@ -376,7 +376,7 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 		}
 		q := *b.Library
 		q.Owner = owner
-		if q.Action == "site_list" || q.Action == "site_add" || q.Action == "site_remove" || q.Action == "site_check" {
+		if q.Action == "site_list" || q.Action == "site_add" || q.Action == "site_update" || q.Action == "site_remove" || q.Action == "site_check" {
 			var result any
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -565,7 +565,7 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 	return nil, errors.New("unknown_action")
 }
 func workspaceError(e error) string {
-	appErrors := map[string]string{"campus_app_requires_local_http_address": "请输入校园服务器本机HTTP地址，并包含端口，例如 http://127.0.0.1:8765。", "campus_app_unreachable": "校园地址无法连接，请先确认应用已经启动。", "campus_app_server_error": "校园应用返回服务错误，请先检查应用日志。", "invalid_campus_app_title": "请填写应用名称，长度不超过240字节。", "campus_app_limit_reached": "已达到30个应用，请先停止不再使用的转发。", "library_snapshot_stale": "资料已更新，请刷新知识树，等待该分支重新整理后再创建研究任务。"}
+	appErrors := map[string]string{"campus_app_requires_local_http_address": "请输入校园服务器本机HTTP地址，并包含端口，例如 http://127.0.0.1:8765。", "campus_app_port_required": "请补充应用端口，例如 127.0.0.1:8765；多个应用时仅填127.0.0.1无法确定目标。", "campus_app_address_already_registered": "此校园地址已被其他应用登记，请编辑对应应用或使用另一个地址。", "campus_app_unreachable": "校园地址无法连接，请确认应用持续运行且端口填写正确，例如 127.0.0.1:8765。", "campus_app_server_error": "校园应用返回服务错误，请先检查应用日志。", "invalid_campus_app_title": "请填写应用名称，长度不超过240字节。", "campus_app_limit_reached": "已达到30个应用，请先停止不再使用的转发。", "library_snapshot_stale": "资料已更新，请刷新知识树，等待该分支重新整理后再创建研究任务。"}
 	if message := appErrors[e.Error()]; message != "" {
 		return message
 	}

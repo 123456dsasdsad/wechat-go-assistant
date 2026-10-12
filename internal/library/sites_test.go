@@ -76,3 +76,59 @@ func TestCampusAppRejectsNonLocalAndCredentialAddresses(t *testing.T) {
 		}
 	}
 }
+
+func TestCampusAppBareAddressAndPortUpdateKeepExistingLink(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "old") }))
+	defer up.Close()
+	newUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "new") }))
+	defer newUp.Close()
+	s, _ := Open(t.TempDir())
+	defer s.Close()
+	if _, e := s.AddCampusApp(context.Background(), "owner", "Test", "127.0.0.1"); e == nil || e.Error() != "campus_app_port_required" {
+		t.Fatal("missing port silently guessed", e)
+	}
+	a, e := s.AddCampusApp(context.Background(), "owner", "Test", strings.TrimPrefix(up.URL, "http://"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	reused, e := s.AddCampusApp(context.Background(), "owner", "Test", "127.0.0.1")
+	if e != nil || reused.ID != a.ID {
+		t.Fatal("unique registered application not recognized", reused, e)
+	}
+	for _, raw := range []string{"http://127.0.0.1", "http://127.0.0.1/", "http://localhost"} {
+		matched, e := s.AddCampusApp(context.Background(), "owner", "Test", raw)
+		if e != nil || matched.ID != a.ID {
+			t.Fatal("complete loopback address not recognized", raw, matched, e)
+		}
+	}
+	updated, e := s.UpdateCampusApp(context.Background(), "owner", a.ID, "", strings.TrimPrefix(newUp.URL, "http://"))
+	if e != nil || updated.ID != a.ID || updated.URL != newUp.URL {
+		t.Fatal("upgrade changed public route ID", updated, e)
+	}
+	if _, e := s.UpdateCampusApp(context.Background(), "other", a.ID, "Hijacked", newUp.URL); !errors.Is(e, ErrNotFound) {
+		t.Fatal("foreign owner updated app", e)
+	}
+	other, e := s.AddCampusApp(context.Background(), "owner", "Second", up.URL)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.AddCampusApp(context.Background(), "owner", "Ambiguous", "localhost"); e == nil || e.Error() != "campus_app_port_required" {
+		t.Fatal("ambiguous port silently selected", e)
+	}
+	if _, e := s.UpdateCampusApp(context.Background(), "owner", a.ID, "", other.URL); e == nil || e.Error() != "campus_app_address_already_registered" {
+		t.Fatal("conflicting address replaced existing route", e)
+	}
+	current, _ := s.CampusApp("owner", a.ID)
+	if current.URL != newUp.URL {
+		t.Fatal("failed update altered existing route", current)
+	}
+	// The original public route ID now reaches the upgraded address.
+	r := httptest.NewRequest("GET", "/library/app/"+a.ID+"/", nil)
+	r.Header.Set("Authorization", "Bearer "+strings.Repeat("k", 32))
+	r.Header.Set("X-Campus-App-Owner", "owner")
+	w := httptest.NewRecorder()
+	Handler(s, strings.Repeat("k", 32)).ServeHTTP(w, r)
+	if w.Code != 200 || w.Body.String() != "new" {
+		t.Fatal("old route no longer works after address update", w.Code, w.Body.String())
+	}
+}

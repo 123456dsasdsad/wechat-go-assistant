@@ -24,6 +24,8 @@ func (s *Store) Action(q Request) (any, error) {
 		return s.CampusApps(q.Owner)
 	case "site_add":
 		return s.AddCampusApp(context.Background(), q.Owner, q.Collection, q.Text)
+	case "site_update":
+		return s.UpdateCampusApp(context.Background(), q.Owner, q.ID, q.Collection, q.Text)
 	case "site_remove":
 		return map[string]bool{"ok": true}, s.RemoveCampusApp(q.Owner, q.ID)
 	case "site_check":

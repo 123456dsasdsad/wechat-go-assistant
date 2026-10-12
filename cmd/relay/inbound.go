@@ -93,6 +93,9 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		}
 	}
 	input := strings.TrimSpace(strings.Join(texts, "\n"))
+	if accessKeyInMessage.MatchString(input) {
+		return in.reply(ctx, msg, "access-input", "这是网页访问 key，请在网页的“访问 key”输入框中使用。为避免泄露，这条消息不会保存为任务、引用资料或发送给 AI。")
+	}
 	if len(msg.Sources) > 0 && in.materials != nil {
 		p, active, e := in.materials.Active(msg.FromUserID)
 		if e != nil {
@@ -126,6 +129,9 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	material, refs, quoted, quoteErr := in.quoteMaterial(ctx, msg)
 	if quoteErr != nil {
 		return in.reply(ctx, msg, "quote", quoteErr.Error())
+	}
+	if accessKeyInMessage.MatchString(material) {
+		return in.reply(ctx, msg, "access-input", "引用内容中包含网页访问 key。这条消息不会作为 AI 任务处理；请把 key 输入网页验证框，或移除 key 后重新发送。")
 	}
 	if handled, e := in.materialCommand(ctx, msg, input, material, refs, media); handled {
 		return e

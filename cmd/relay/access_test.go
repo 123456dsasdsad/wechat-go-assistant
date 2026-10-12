@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +11,20 @@ import (
 
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/accesskeys"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/files"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 )
+
+func TestAccessKeyMessagesNeverEnterAITaskQueue(t *testing.T) {
+	defer metadb.CloseAll()
+	in := inboundFixture(t)
+	key := "wxk_" + strings.Repeat("a", 43)
+	if e := in.handle(context.Background(), textMessage("key-message", key)); e != nil {
+		t.Fatal(e)
+	}
+	if len(in.queue.History()) != 0 {
+		t.Fatal("access key became an AI task")
+	}
+}
 
 func accessFixture(t *testing.T) (*inbound, http.Handler) {
 	t.Helper()

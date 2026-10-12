@@ -87,3 +87,50 @@ func TestCampusAppTemplatePathRewrite(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestCampusAppURLConcatenationAndDelimitersRemainValid(t *testing.T) {
+	base := "/wechat-files/manage/apps/abc/"
+	for _, tc := range []struct{ input, want string }{
+		{"api('/api/projects/'+id+'/meta')", "api('" + base + "api/projects/'+id+'/meta')"},
+		{"api('/api/projects/'+id+'/'+kind)", "api('" + base + "api/projects/'+id+'/'+kind)"},
+		{"const base='/api' + '/projects'; path.split('/').join('/')", "const base='" + base + "api' + '/projects'; path.split('/').join('/')"},
+		{`<a href="/">home</a>`, `<a href="` + base + `">home</a>`},
+		{"fetch('/wechat-files/manage/apps/abc/api/projects')", "fetch('/wechat-files/manage/apps/abc/api/projects')"},
+	} {
+		if got := string(adaptCampusAppBody([]byte(tc.input), base)); got != tc.want {
+			t.Fatal("invalid rewritten URL", got, tc.want)
+		}
+	}
+}
+
+func TestCampusAppRestartPageRetriesWithoutChangingAPIResponses(t *testing.T) {
+	defer metadb.CloseAll()
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "active") }))
+	s, _ := library.Open(t.TempDir())
+	defer s.Close()
+	site, e := s.AddCampusApp(context.Background(), "owner", "Restart test", app.URL)
+	if e != nil {
+		t.Fatal(e)
+	}
+	app.Close()
+	up := httptest.NewServer(library.Handler(s, strings.Repeat("k", 32)))
+	defer up.Close()
+	in := inboundFixture(t)
+	in.library, _ = library.NewClient(up.URL, strings.Repeat("k", 32))
+	cookie, _ := in.files.Grant("owner", "restart-test")
+	for _, tc := range []struct {
+		path, accept string
+		page         bool
+	}{
+		{"", "text/html", true}, {"api/projects", "application/json", false},
+	} {
+		r := httptest.NewRequest("GET", "/wechat-files/manage/apps/"+site.ID+"/"+tc.path, nil)
+		r.AddCookie(&http.Cookie{Name: "wechat_manage", Value: cookie})
+		r.Header.Set("Accept", tc.accept)
+		w := httptest.NewRecorder()
+		in.workspaceHandler("").ServeHTTP(w, r)
+		if w.Code != 502 || strings.Contains(w.Body.String(), `http-equiv="refresh"`) != tc.page {
+			t.Fatal("restart response incorrect", tc.path, w.Code, w.Body.String())
+		}
+	}
+}

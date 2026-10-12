@@ -22,7 +22,11 @@ type CampusApp struct {
 }
 
 func campusAppURL(raw string) (*url.URL, error) {
-	u, e := url.Parse(strings.TrimSpace(raw))
+	raw = strings.TrimSpace(raw)
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, e := url.Parse(raw)
 	if e != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Port() == "" {
 		return nil, errors.New("campus_app_requires_local_http_address")
 	}
@@ -36,6 +40,28 @@ func campusAppURL(raw string) (*url.URL, error) {
 	u.Path = strings.TrimRight(u.Path, "/")
 	u.RawPath = ""
 	return u, nil
+}
+
+func (s *Store) campusAppInput(owner, identifier, raw string) (*url.URL, error) {
+	bare := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(raw), "http://"), "/")
+	if bare != "127.0.0.1" && bare != "localhost" && bare != "[::1]" {
+		return campusAppURL(raw)
+	}
+	if identifier != "" {
+		a, e := s.CampusApp(owner, identifier)
+		if e != nil {
+			return nil, e
+		}
+		return campusAppURL(a.URL)
+	}
+	apps, e := s.CampusApps(owner)
+	if e != nil {
+		return nil, e
+	}
+	if len(apps) != 1 {
+		return nil, errors.New("campus_app_port_required")
+	}
+	return campusAppURL(apps[0].URL)
 }
 func probeCampusApp(ctx context.Context, raw string) (int, error) {
 	u, e := campusAppURL(raw)
@@ -94,7 +120,7 @@ func (s *Store) AddCampusApp(ctx context.Context, owner, title, raw string) (Cam
 	if !validName(title) {
 		return CampusApp{}, errors.New("invalid_campus_app_title")
 	}
-	u, e := campusAppURL(raw)
+	u, e := s.campusAppInput(owner, "", raw)
 	if e != nil {
 		return CampusApp{}, e
 	}
@@ -130,6 +156,51 @@ func (s *Store) AddCampusApp(ctx context.Context, owner, title, raw string) (Cam
 	_, e = s.db.Exec(`INSERT INTO campus_apps(owner,id,title,upstream,document) VALUES(?,?,?,?,?) ON CONFLICT(owner,upstream) DO UPDATE SET title=excluded.title,document=excluded.document`, owner, a.ID, title, a.URL, b)
 	return a, e
 }
+func (s *Store) UpdateCampusApp(ctx context.Context, owner, identifier, title, raw string) (CampusApp, error) {
+	a, e := s.CampusApp(owner, identifier)
+	if e != nil {
+		return CampusApp{}, e
+	}
+	if title == "" {
+		title = a.Title
+	}
+	if !validName(title) {
+		return a, errors.New("invalid_campus_app_title")
+	}
+	u, e := s.campusAppInput(owner, identifier, raw)
+	if e != nil {
+		return a, e
+	}
+	status, e := probeCampusApp(ctx, u.String())
+	if e != nil {
+		return a, e
+	}
+	if status >= 500 {
+		return a, errors.New("campus_app_server_error")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var conflict int
+	if e = s.db.QueryRow("SELECT COUNT(*) FROM campus_apps WHERE owner=? AND upstream=? AND id<>?", owner, u.String(), identifier).Scan(&conflict); e != nil {
+		return a, e
+	}
+	if conflict != 0 {
+		return a, errors.New("campus_app_address_already_registered")
+	}
+	a.Title, a.URL, a.Updated = title, u.String(), time.Now().UTC()
+	b, _ := json.Marshal(a)
+	res, e := s.db.Exec("UPDATE campus_apps SET title=?,upstream=?,document=? WHERE owner=? AND id=?", title, a.URL, b, owner, identifier)
+	if e != nil {
+		return a, e
+	}
+	if count, e := res.RowsAffected(); e != nil {
+		return a, e
+	} else if count == 0 {
+		return a, ErrNotFound
+	}
+	return a, nil
+}
+
 func (s *Store) RemoveCampusApp(owner, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
