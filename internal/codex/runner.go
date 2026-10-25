@@ -21,6 +21,7 @@ type Config struct {
 	UsageBaseline                                         usage.Tokens
 	Binary, Home, Directory, Key, Model, Effort, ThreadID string
 	Persistent                                            bool
+	IsolateState                                          bool
 	Permissions                                           string
 	AppServer                                             bool
 	Steering                                              Steering
@@ -69,15 +70,22 @@ func Run(ctx context.Context, c Config, prompt string) (Result, error) {
 	}
 	args = append(args, questionArgs(c.QuestionMCP)...)
 	args = append(args, "-")
+	args = isolatedStateArgs(c, args)
 	cmd := exec.Command(c.Binary, args...)
 	cmd.Env = []string{}
 	for _, v := range os.Environ() {
 		name := strings.SplitN(v, "=", 2)[0]
+		if c.IsolateState && strings.EqualFold(name, "CODEX_SQLITE_HOME") {
+			continue
+		}
 		if name != "CODEX_HOME" && name != "COCKPIT_API_KEY" && name != "OPENAI_API_KEY" && name != "CODEX_API_KEY" {
 			cmd.Env = append(cmd.Env, v)
 		}
 	}
 	cmd.Env = append(cmd.Env, "CODEX_HOME="+c.Home, "COCKPIT_API_KEY="+c.Key)
+	if c.IsolateState {
+		cmd.Env = append(cmd.Env, "CODEX_SQLITE_HOME="+c.Home)
+	}
 	cmd.Env = append(cmd.Env, questionEnv(c.QuestionMCP)...)
 	if c.QuestionMCP != nil {
 		prompt = userinput.Instructions + "\n" + prompt

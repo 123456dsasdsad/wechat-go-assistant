@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -28,6 +30,7 @@ type config struct {
 type queue struct {
 	Jobs []struct {
 		ID      string `json:"id"`
+		Family  string `json:"family"`
 		Method  string `json:"method"`
 		Dataset string `json:"dataset"`
 		Seed    int    `json:"seed"`
@@ -40,6 +43,53 @@ type metrics struct {
 	Microstep int      `json:"microstep"`
 	Updates   int      `json:"optimizer_update"`
 	Loss      *float64 `json:"loss"`
+	Completed bool     `json:"-"`
+	ValF1     *float64 `json:"-"`
+}
+
+func parseDockerProgress(logs string) (metrics, time.Time, bool) {
+	var latest metrics
+	var modified time.Time
+	found := false
+	for _, line := range strings.Split(logs, "\n") {
+		stamp, body, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		updated, err := time.Parse(time.RFC3339Nano, stamp)
+		if err != nil || updated.Before(modified) {
+			continue
+		}
+		var record struct {
+			Epoch     int      `json:"epoch"`
+			Update    *int     `json:"update"`
+			Loss      *float64 `json:"loss"`
+			TrainLoss *float64 `json:"train_loss"`
+			ValF1     *float64 `json:"val_macro_F1"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(body)), &record) != nil || record.Epoch < 1 || record.Epoch > 120 {
+			continue
+		}
+		if record.Update != nil && *record.Update >= 0 && *record.Update < 250 {
+			latest = metrics{Epoch: record.Epoch, Updates: *record.Update, Loss: record.Loss}
+		} else if record.TrainLoss != nil {
+			latest = metrics{Epoch: record.Epoch, Loss: record.TrainLoss, Completed: true, ValF1: record.ValF1}
+		} else {
+			continue
+		}
+		modified, found = updated, true
+	}
+	return latest, modified, found
+}
+
+func dockerProgress(id string) (metrics, time.Time, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	b, err := exec.CommandContext(ctx, "docker", "logs", "--timestamps", "--tail", "16", id).CombinedOutput()
+	if err != nil || len(b) > 65536 {
+		return metrics{}, time.Time{}, false
+	}
+	return parseDockerProgress(string(b))
 }
 
 func snapshot(c config, now time.Time) (watches.Update, error) {
@@ -80,31 +130,60 @@ func snapshot(c config, now time.Time) (watches.Update, error) {
 			if visited > 5000 {
 				return filepath.SkipAll
 			}
-			if d.IsDir() || d.Name() != "live_progress.json" {
+			if d.IsDir() || (d.Name() != "live_progress.json" && d.Name() != "history.json") {
 				return nil
 			}
 			stat, e := d.Info()
-			if e != nil || stat.Size() > 16384 || !stat.ModTime().After(modified) {
+			if e != nil || stat.Size() > 2<<20 || !stat.ModTime().After(modified) {
 				return nil
 			}
 			data, e := os.ReadFile(p)
 			var m metrics
-			if e == nil && json.Unmarshal(data, &m) == nil {
+			valid := false
+			if e == nil && d.Name() == "live_progress.json" {
+				valid = json.Unmarshal(data, &m) == nil && m.Epoch >= 1 && m.Epoch <= 120
+			} else if e == nil {
+				var history []struct {
+					Epoch int      `json:"epoch"`
+					Loss  *float64 `json:"train_loss"`
+					ValF1 *float64 `json:"val_macro_F1"`
+				}
+				if json.Unmarshal(data, &history) == nil && len(history) > 0 && len(history) <= 120 {
+					row := history[len(history)-1]
+					m = metrics{Epoch: row.Epoch, Loss: row.Loss, ValF1: row.ValF1, Completed: true}
+					valid = m.Epoch >= 1 && m.Epoch <= 120
+				}
+			}
+			if valid {
 				latest = m
 				found = true
 				modified = stat.ModTime()
 			}
 			return nil
 		})
+		if j.Family == "baseline" {
+			if m, updated, ok := dockerProgress(j.ID); ok && updated.After(modified) {
+				latest, modified, found = m, updated, true
+			}
+		}
 		line := fmt.Sprintf("%s / %s / seed %d / GPU %d", j.Dataset, j.Method, j.Seed, j.GPU)
 		if found {
-			line += fmt.Sprintf("\n轮次 %d · microstep %d · 优化步 %d", latest.Epoch, latest.Microstep, latest.Updates)
+			if latest.Completed {
+				line += fmt.Sprintf("\n已完成 %d / 120 轮", latest.Epoch)
+			} else if j.Family == "baseline" {
+				line += fmt.Sprintf("\n训练中：轮次 %d / 120 · 优化步 %d / 250", latest.Epoch, latest.Updates)
+			} else {
+				line += fmt.Sprintf("\n训练中：轮次 %d / 120 · microstep %d · 优化步 %d / 250", latest.Epoch, latest.Microstep, latest.Updates)
+			}
 			if latest.Loss != nil {
 				line += fmt.Sprintf(" · loss %.5g", *latest.Loss)
 			}
+			if latest.ValF1 != nil {
+				line += fmt.Sprintf(" · 验证 F1 %.2f%%", *latest.ValF1*100)
+			}
 			line += "\n训练记录更新：" + modified.In(time.FixedZone("Asia/Shanghai", 8*3600)).Format("01-02 15:04:05")
 		} else {
-			line += "\n等待首份训练记录。"
+			line += "\n调度状态为运行；暂未读取到训练进度，请查看日志。"
 		}
 		lines = append(lines, line)
 	}
@@ -163,12 +242,22 @@ func run(c config) error {
 func main() {
 	path := flag.String("config", "", "private configuration")
 	once := flag.Bool("once", false, "read and publish once")
+	printOnly := flag.Bool("print", false, "read and print the public training snapshot without publishing")
 	flag.Parse()
 	b, e := os.ReadFile(*path)
 	var c config
 	if e != nil || json.Unmarshal(b, &c) != nil || !filepath.IsAbs(c.Root) {
 		fmt.Println(`{"ok":false,"error":"invalid_config"}`)
 		os.Exit(1)
+	}
+	if *printOnly {
+		u, err := snapshot(c, time.Now())
+		if err != nil {
+			fmt.Println(`{"ok":false,"error":"snapshot_failed"}`)
+			os.Exit(1)
+		}
+		json.NewEncoder(os.Stdout).Encode(u)
+		return
 	}
 	for {
 		e = run(c)

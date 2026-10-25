@@ -288,7 +288,7 @@ func (s *Store) EnqueuePersonalized(source, input, owner, replyContext string, c
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(profiles) > 0 && !conversations.ValidProject(profiles[0].Project) {
+	if len(profiles) > 0 && (!profiles[0].Identity.Valid() || !conversations.ValidProject(profiles[0].Project)) {
 		return Job{}, errors.New("invalid_project")
 	}
 	j, e := s.enqueue(source, input, owner, replyContext, choice, refs, cid)
@@ -299,6 +299,7 @@ func (s *Store) EnqueuePersonalized(source, input, owner, replyContext string, c
 		j.Memory = memory
 		if len(profiles) > 0 {
 			j.Project = profiles[0].Project
+			j.Identity = profiles[0].Identity
 			j.LibraryTopics = append([]string(nil), profiles[0].LibraryTopics...)
 			j.BudgetUSD = profiles[0].BudgetUSD
 		}

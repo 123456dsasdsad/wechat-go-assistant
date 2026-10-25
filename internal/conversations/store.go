@@ -18,18 +18,19 @@ import (
 )
 
 type Session struct {
-	Pinned      bool      `json:"pinned,omitempty"`
-	Archived    bool      `json:"archived,omitempty"`
-	Profile     Profile   `json:"profile"`
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Number      int       `json:"number"`
-	Created     time.Time `json:"created"`
-	TitleMode   string    `json:"title_mode,omitempty"`
-	FirstTask   string    `json:"first_task,omitempty"`
-	FirstTaskAt time.Time `json:"first_task_at,omitempty"`
-	LastTask    string    `json:"last_task,omitempty"`
-	LastTaskAt  time.Time `json:"last_task_at,omitempty"`
+	BackgroundSource string    `json:"background_source,omitempty"`
+	Pinned           bool      `json:"pinned,omitempty"`
+	Archived         bool      `json:"archived,omitempty"`
+	Profile          Profile   `json:"profile"`
+	ID               string    `json:"id"`
+	Title            string    `json:"title"`
+	Number           int       `json:"number"`
+	Created          time.Time `json:"created"`
+	TitleMode        string    `json:"title_mode,omitempty"`
+	FirstTask        string    `json:"first_task,omitempty"`
+	FirstTaskAt      time.Time `json:"first_task_at,omitempty"`
+	LastTask         string    `json:"last_task,omitempty"`
+	LastTaskAt       time.Time `json:"last_task_at,omitempty"`
 }
 type receipt struct{ ID, Reply string }
 type selection struct {

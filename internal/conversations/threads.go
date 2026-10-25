@@ -49,10 +49,15 @@ func OpenThreads(path string) (*Threads, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
+	owners := map[string]string{}
 	for id, thread := range s.state.Threads {
 		if !ValidID(id) || !ValidThread(thread) {
 			return nil, errors.New("invalid_saved_thread")
 		}
+		if other, ok := owners[thread]; ok && other != id {
+			return nil, errors.New("codex_thread_shared_between_conversations")
+		}
+		owners[thread] = id
 	}
 	for _, turn := range s.state.Turns {
 		if !validTurn(turn) {
@@ -88,6 +93,13 @@ func (s *Threads) Save(turn Turn) error {
 	defer s.mu.Unlock()
 	if !validTurn(turn) {
 		return errors.New("invalid_turn")
+	}
+	if turn.ThreadID != "" {
+		for id, thread := range s.state.Threads {
+			if thread == turn.ThreadID && id != turn.ConversationID {
+				return errors.New("codex_thread_shared_between_conversations")
+			}
+		}
 	}
 	if existing := s.state.Threads[turn.ConversationID]; existing != "" && turn.ThreadID != "" && existing != turn.ThreadID {
 		return errors.New("codex_thread_mismatch")

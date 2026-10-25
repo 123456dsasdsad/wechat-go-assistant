@@ -9,7 +9,19 @@ import (
 	"strings"
 )
 
+// Identity names the application and project; Project below is only a workspace path.
+type Identity struct {
+	App         string `json:"app,omitempty"`
+	ProjectID   string `json:"project_id,omitempty"`
+	ProjectName string `json:"project_name,omitempty"`
+}
+
+func (v Identity) Valid() bool {
+	return len(v.App) <= 80 && len(v.ProjectID) <= 180 && len(v.ProjectName) <= 240 && !strings.ContainsAny(v.App+v.ProjectID+v.ProjectName, "\x00\r\n")
+}
+
 type Profile struct {
+	Identity
 	LibraryTopics []string `json:"library_topics,omitempty"`
 	Project       string   `json:"project"`
 	Notes         string   `json:"notes"`
@@ -53,10 +65,15 @@ func (s *Store) UpdateProfile(id string, p Profile) error {
 		}
 		p.LibraryTopics[i] = v
 	}
-	if !ValidProject(p.Project) || len(p.Notes) > 8192 || p.BudgetUSD < 0 || p.BudgetUSD > 1e6 || math.IsNaN(p.BudgetUSD) || math.IsInf(p.BudgetUSD, 0) {
+	if !p.Identity.Valid() || !ValidProject(p.Project) || len(p.Notes) > 8192 || p.BudgetUSD < 0 || p.BudgetUSD > 1e6 || math.IsNaN(p.BudgetUSD) || math.IsInf(p.BudgetUSD, 0) {
 		return errors.New("invalid_profile")
 	}
-	return s.update(id, func(v *Session) { v.Profile = p })
+	return s.update(id, func(v *Session) {
+		if p.Identity == (Identity{}) {
+			p.Identity = v.Profile.Identity
+		}
+		v.Profile = p
+	})
 }
 func (s *Store) Mark(id string, pinned, archived bool) error {
 	return s.update(id, func(v *Session) { v.Pinned = pinned; v.Archived = archived })

@@ -18,6 +18,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/personalwechat"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/processlock"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/quotes"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/settings"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/watches"
@@ -33,6 +34,8 @@ import (
 )
 
 type config struct {
+	ClusterNodes        []jobs.NodePolicy     `json:"cluster_nodes,omitempty"`
+	LegacyNode          string                `json:"legacy_node,omitempty"`
 	StatePath           string                `json:"state_path"`
 	JobsDir             string                `json:"jobs_dir"`
 	KeyFile             string                `json:"key_file"`
@@ -78,6 +81,14 @@ func run(ctx context.Context) error {
 	if json.Unmarshal(raw, &cfg) != nil {
 		return errors.New("invalid_config")
 	}
+	if err = os.MkdirAll(filepath.Dir(cfg.StatePath), 0700); err != nil {
+		return err
+	}
+	release, err := processlock.Acquire(cfg.StatePath + ".lock")
+	if err != nil {
+		return errors.New("wechat_state_is_owned_by_another_process")
+	}
+	defer release()
 	catalog, err := models.Load(cfg.ModelsFile)
 	if err != nil {
 		return err
@@ -98,17 +109,6 @@ func run(ctx context.Context) error {
 	if len(key) < 32 {
 		return errors.New("invalid_private_key")
 	}
-	if err = os.MkdirAll(filepath.Dir(cfg.StatePath), 0700); err != nil {
-		return err
-	}
-	lock := cfg.StatePath + ".lock"
-	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return errors.New("wechat_state_is_owned_by_another_process")
-	}
-	fmt.Fprintln(f, os.Getpid())
-	f.Close()
-	defer os.Remove(lock)
 	state, err := weixin.LoadState(cfg.StatePath)
 	if err != nil {
 		return errors.New("wechat_authorization_unreadable")
@@ -130,6 +130,9 @@ func run(ctx context.Context) error {
 	store, err := jobs.Open(cfg.JobsDir)
 	if err != nil {
 		return errors.New("job_store_unreadable")
+	}
+	if err = store.ConfigureNodes(cfg.ClusterNodes, cfg.LegacyNode); err != nil {
+		return err
 	}
 	if cfg.FilesDir == "" {
 		cfg.FilesDir = filepath.Join(filepath.Dir(cfg.JobsDir), "files")
@@ -163,6 +166,9 @@ func run(ctx context.Context) error {
 		}
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"packagePrepared": true, "job": j.ID, "originalFiles": len(j.Outputs), "packageBytes": j.MediaPackage.Size, "packageSHA256": j.MediaPackage.SHA256, "oldMediaPaused": true})
 	}
+	if err = retainTaskFiles(store, fileStore, outputStore); err != nil {
+		return err
+	}
 	if err = outputStore.Prune(); err != nil {
 		return errors.New("output_retention_cleanup_failed")
 	}
@@ -177,7 +183,7 @@ func run(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-				if fileStore.Prune() != nil || outputStore.Prune() != nil {
+				if retainTaskFiles(store, fileStore, outputStore) != nil || fileStore.Prune() != nil || outputStore.Prune() != nil {
 					fmt.Println(`{"type":"file_retention_retry"}`)
 				}
 			}
@@ -374,7 +380,11 @@ func run(ctx context.Context) error {
 			if contextToken == "" {
 				return nil, errors.New("reply_context_unavailable")
 			}
-			selected := sessions.Current()
+			cid := fileStore.Conversation(owner, ref.ID)
+			selected, ok := sessions.Get(cid)
+			if !ok || selected.Archived {
+				return nil, errors.New("upload_conversation_unavailable")
+			}
 			job, err := in.enqueue(source, instruction, owner, contextToken, selected.ID, []files.Ref{ref})
 			if err != nil {
 				return nil, err

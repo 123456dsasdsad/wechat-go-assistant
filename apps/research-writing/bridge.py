@@ -1,5 +1,6 @@
 """Submit model reviews to the existing campus queue; retain results across page closes."""
 import http.cookies
+import hashlib
 import json
 import os
 import secrets
@@ -85,15 +86,11 @@ def submit(gateway, c, job):
     project = c.execute('SELECT * FROM projects WHERE id=?', (job['project_id'],)).fetchone()
     cid = project['ai_conversation']
     if not cid:
-        before = gateway.snapshot()
-        title = '研序评审-' + job['project_id'][:8]
-        gateway.call('conversation', input='新建会话 ' + title)
-        snap = gateway.snapshot()
-        cid = snap['current']
+        source = hashlib.sha256(('research-review:' + job['project_id']).encode()).hexdigest()[:24]
+        cid = gateway.call('conversation_create', source=source, name='研序评审-' + job['project_id'][:8])['conversation']
         c.execute('UPDATE projects SET ai_conversation=? WHERE id=?', (cid, job['project_id'])); c.commit()
-        if before.get('current') and before['current'] != cid:
-            gateway.call('conversation', input='继续会话 ' + before['current'])
-    gateway.call('profile', conversation=cid, model='gpt-6.1-sol', effort='high', profile={})
+    gateway.call('identity', conversation=cid, profile={'app': 'research-writing', 'project_id': job['project_id'], 'project_name': '研序 · ' + project['title'][:70]})
+    gateway.call('model', conversation=cid, model='gpt-6.1-sol', effort='high')
     root = (repo.DB.parent / 'ai-reviews').resolve()
     src, output = root / (job['id'] + '.input.json'), root / (job['id'] + '.report.json')
     prompt = f'''研究写作章节评审，任务标识 {job['id']}。请读取 {src}。

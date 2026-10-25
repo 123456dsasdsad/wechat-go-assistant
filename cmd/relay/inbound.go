@@ -58,6 +58,8 @@ func (in *inbound) reply(ctx context.Context, msg weixin.Message, kind, text str
 	return err
 }
 func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
+	currentID := in.sessions.Current().ID
+	ctx = context.WithValue(ctx, inboundConversationKey{}, currentID)
 	if msg.FromUserID != in.owner || msg.GroupID != "" || msg.Type != 1 {
 		return nil
 	}
@@ -102,12 +104,12 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		return in.reply(ctx, msg, "access-input", "这是网页访问 key，请在网页的“访问 key”输入框中使用。为避免泄露，这条消息不会保存为任务、引用资料或发送给 AI。")
 	}
 	if len(msg.Sources) > 0 && in.materials != nil {
-		p, active, e := in.materials.Active(msg.FromUserID)
+		p, active, e := in.materials.Active(msg.FromUserID, currentID)
 		if e != nil {
 			return e
 		}
 		if !active {
-			p, e = in.materials.Begin(msg.FromUserID, msg.Key(), "转发材料 "+time.Now().Format("01-02 15:04"), in.sessions.Current().ID)
+			p, e = in.materials.Begin(msg.FromUserID, msg.Key(), "转发材料 "+time.Now().Format("01-02 15:04"), currentID)
 			if e != nil {
 				return e
 			}
@@ -155,7 +157,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 			return e
 		}
 		if in.watches != nil {
-			if v, ok := in.watches.Current(msg.FromUserID, in.sessions.Current().ID); ok && (input == "任务状态" || input == "任务列表" || input == "查看任务" || input == "查看进度" || input == "进度" || input == "任务进度" || statusQuestion.MatchString(strings.Trim(input, " \n。？?!！"))) {
+			if v, ok := in.watches.Current(msg.FromUserID, currentID); ok && (input == "任务状态" || input == "任务列表" || input == "查看任务" || input == "查看进度" || input == "进度" || input == "任务进度" || statusQuestion.MatchString(strings.Trim(input, " \n。？?!！"))) {
 				return in.reply(ctx, msg, "watch", in.watchText(v))
 			}
 		}
@@ -163,7 +165,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 			return e
 		}
 		if in.assistant != nil {
-			handled, reply, e := in.assistant.Handle(msg.FromUserID, msg.Key(), input, in.sessions.Current().ID, in.preferences.Current(in.sessions.Current().ID), time.Now())
+			handled, reply, e := in.assistant.Handle(msg.FromUserID, msg.Key(), input, currentID, in.preferences.Current(currentID), time.Now())
 			if e != nil {
 				return e
 			}
@@ -261,14 +263,14 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		if handled {
 			return in.reply(ctx, msg, "conversation", text)
 		}
-		handled, text, err = in.preferences.Handle(msg.Key(), input, in.sessions.Current().ID)
+		handled, text, err = in.preferences.Handle(msg.Key(), input, currentID)
 		if err != nil {
 			return err
 		}
 		if handled {
 			err = in.reply(ctx, msg, "settings", text)
 			if err == nil {
-				choice := in.preferences.Current(in.sessions.Current().ID)
+				choice := in.preferences.Current(currentID)
 				fmt.Printf("{\"type\":\"settings_replied\",\"model\":%q,\"effort\":%q}\n", choice.Model, choice.Effort)
 			}
 			return err
@@ -278,7 +280,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 			if in.publicURL == "" {
 				return in.reply(ctx, msg, "files", "聊天内容入口尚未配置。")
 			}
-			token, e := in.files.Grant(msg.FromUserID, msg.Key())
+			token, e := in.files.GrantConversation(msg.FromUserID, msg.Key(), currentID)
 			if e != nil {
 				return in.reply(ctx, msg, "files", "链接暂时不能生成，请稍后重试。")
 			}
@@ -289,13 +291,13 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 			if in.publicURL == "" {
 				return in.reply(ctx, msg, "files", "手机上传入口尚未配置。")
 			}
-			token, err := in.files.Grant(msg.FromUserID, msg.Key())
+			token, err := in.files.GrantConversation(msg.FromUserID, msg.Key(), currentID)
 			if err != nil {
 				return in.reply(ctx, msg, "files", "上传链接暂时不能生成，请使用最近的有效链接或稍后重试。")
 			}
 			return in.reply(ctx, msg, "files", "打开这个链接选择文件（有效期 30 分钟）：\n"+in.publicURL+"#"+token+"\n上传后发送“分析最新文件：你的要求”，或使用页面上的文件指令。网页上传没有固定文件大小上限，压缩包请使用 ZIP。")
 		case "文件列表", "查看文件":
-			refs := in.files.List(msg.FromUserID)
+			refs := in.files.ListConversation(msg.FromUserID, currentID)
 			if len(refs) == 0 {
 				return in.reply(ctx, msg, "files", "还没有收到文件。发送“上传文件”获取手机上传入口。")
 			}
@@ -311,7 +313,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		}
 	}
 	if in.watches != nil {
-		if _, ok := in.watches.Current(msg.FromUserID, in.sessions.Current().ID); ok {
+		if _, ok := in.watches.Current(msg.FromUserID, currentID); ok {
 			return in.reply(ctx, msg, "watch", "这个会话用于查看原 Codex 任务。发送“任务状态”或“查看进度”；修改任务要求请回到原 Codex 会话。发送“会话列表”可切换其他微信会话。")
 		}
 	}
@@ -334,7 +336,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		}
 		cid := in.quotedConversation(msg)
 		if cid == "" {
-			cid = in.sessions.Current().ID
+			cid = currentID
 		}
 		j, v, active, e := in.queue.SupplementMessage(msg.Key(), body, msg.FromUserID, msg.ContextToken, cid, in.preferences.Current(cid))
 		if e != nil {
@@ -373,7 +375,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 		} else {
 			name = item.File.Name
 		}
-		ref, err := in.files.Save(msg.FromUserID, msg.Key()+":file:"+strconv.Itoa(i), name, bytes.NewReader(data))
+		ref, err := in.files.SaveScoped(msg.FromUserID, msg.Key()+":file:"+strconv.Itoa(i), name, bytes.NewReader(data), currentID)
 		if err != nil {
 			return in.reply(ctx, msg, "files", "文件保存失败。请检查文件名、大小，或稍后重试。")
 		}
@@ -393,7 +395,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	}
 	taskCID := in.quotedConversation(msg)
 	if taskCID == "" {
-		taskCID = in.sessions.Current().ID
+		taskCID = currentID
 	}
 	choice, body, err := in.preferences.ChoiceForTask(input, taskCID)
 	if err != nil {
@@ -401,7 +403,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	}
 	if len(refs) == 0 && !quoted {
 		var handled bool
-		refs, body, handled, err = in.fileTask(msg.FromUserID, body)
+		refs, body, handled, err = in.fileTask(msg.FromUserID, body, taskCID)
 		if handled && err != nil {
 			return in.reply(ctx, msg, "files", "未找到所选文件。发送“文件列表”查看文件，或发送“上传文件”重新上传。")
 		}
@@ -412,7 +414,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	}
 	memory := ""
 	if in.assistant != nil {
-		memory = in.assistant.MemoryText(msg.FromUserID)
+		memory = in.assistant.MemoryText(msg.FromUserID, taskCID)
 	}
 	memory += "\n会话偏好资料：\n" + session.Profile.Notes
 	job, err := in.queue.EnqueuePersonalized(msg.Key(), body, msg.FromUserID, msg.ContextToken, choice, refs, session.ID, memory, session.Profile)
@@ -441,7 +443,7 @@ func (in *inbound) handle(ctx context.Context, msg weixin.Message) error {
 	}
 	return in.reply(ctx, msg, "ack", text)
 }
-func (in *inbound) fileTask(owner, input string) ([]files.Ref, string, bool, error) {
+func (in *inbound) fileTask(owner, input string, conversations ...string) ([]files.Ref, string, bool, error) {
 	for _, prefix := range []string{"分析最新文件", "分析文件"} {
 		if !strings.HasPrefix(input, prefix) {
 			continue
@@ -463,7 +465,11 @@ func (in *inbound) fileTask(owner, input string) ([]files.Ref, string, bool, err
 			if id != "" {
 				return nil, "", true, fmt.Errorf("invalid_file_command")
 			}
-			refs := in.files.List(owner)
+			cid := in.sessions.Current().ID
+			if len(conversations) > 0 {
+				cid = conversations[0]
+			}
+			refs := in.files.ListConversation(owner, cid)
 			if len(refs) == 0 {
 				return nil, "", true, fmt.Errorf("file_not_found")
 			}

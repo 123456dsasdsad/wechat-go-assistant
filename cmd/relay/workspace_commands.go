@@ -30,7 +30,7 @@ func (in *inbound) enqueue(source, input, owner, reply, cid string, refs []files
 	}
 	memory := ""
 	if in.assistant != nil {
-		memory = in.assistant.MemoryText(owner)
+		memory = in.assistant.MemoryText(owner, cid)
 	}
 	if session.Profile.Notes != "" {
 		memory += "\n会话偏好资料：\n" + session.Profile.Notes
@@ -76,7 +76,7 @@ func (in *inbound) workspaceCommand(ctx context.Context, msg weixin.Message, inp
 		b.WriteString("运行模板 <名称>：任务要求\n保存模板 <名称>：指令（用{{内容}}插入任务要求）\n删除模板 <名称>")
 		return reply(b.String())
 	case "会话用量", "任务用量":
-		cid := in.sessions.Current().ID
+		cid := in.currentID(ctx)
 		if input == "任务用量" {
 			cid = ""
 		}

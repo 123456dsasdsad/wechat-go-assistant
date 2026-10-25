@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/artifacts"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/metadb"
 	"os"
@@ -15,13 +16,14 @@ import (
 )
 
 type resultOutbox struct {
-	Training       bool              `json:"training,omitempty"`
-	Task           jobs.Task         `json:"task"`
-	Completion     jobs.Completion   `json:"completion"`
-	Directory      string            `json:"directory"`
-	Entries        []artifacts.Entry `json:"entries"`
-	ResultAccepted bool              `json:"result_accepted"`
-	Finished       bool              `json:"finished"`
+	Turn           *conversations.Turn `json:"turn,omitempty"`
+	Training       bool                `json:"training,omitempty"`
+	Task           jobs.Task           `json:"task"`
+	Completion     jobs.Completion     `json:"completion"`
+	Directory      string              `json:"directory"`
+	Entries        []artifacts.Entry   `json:"entries"`
+	ResultAccepted bool                `json:"result_accepted"`
+	Finished       bool                `json:"finished"`
 }
 
 var outboxLocks sync.Map
@@ -40,8 +42,17 @@ func resultPath(cfg config, v resultOutbox) string {
 	}
 	return outboxPath(cfg, v.Task.ID)
 }
-func queueResult(cfg config, task jobs.Task, c jobs.Completion, dir string) (resultOutbox, error) {
+func queueResult(cfg config, task jobs.Task, c jobs.Completion, dir string, turns ...conversations.Turn) (resultOutbox, error) {
 	v := resultOutbox{Task: task, Completion: c, Directory: dir}
+	if len(turns) > 0 {
+		turn := turns[0]
+		turn.Text, turn.Error, turn.Usage = c.Result, c.Error, c.Usage
+		turn.ToolCount, turn.Outputs, turn.SteerReceipts = c.ToolCount, c.Outputs, c.SteerReceipts
+		if turn.ConversationID != task.ConversationID || turn.JobID != task.ID {
+			return v, errors.New("outbox_turn_mismatch")
+		}
+		v.Turn = &turn
+	}
 	if c.Error == "" {
 		if e := registerActionOutputs(task, dir); e != nil {
 			return v, e
@@ -70,8 +81,14 @@ func recoverResult(ctx context.Context, cfg config, key string, v resultOutbox) 
 	defer lock.Unlock()
 	var err error
 	v, err = reloadResult(cfg, v)
-	if err != nil || v.Finished {
+	if err != nil {
 		return err
+	}
+	if err = restoreOutboxTurn(cfg, v); err != nil {
+		return err
+	}
+	if v.Finished {
+		return nil
 	}
 	path := resultPath(cfg, v)
 	rel, e := filepath.Rel(cfg.WorkRoot, v.Directory)
@@ -148,8 +165,14 @@ func acceptResult(ctx context.Context, cfg config, key string, v resultOutbox) e
 	lock.Lock()
 	defer lock.Unlock()
 	v, e := reloadResult(cfg, v)
-	if e != nil || v.ResultAccepted {
+	if e != nil {
 		return e
+	}
+	if e = restoreOutboxTurn(cfg, v); e != nil {
+		return e
+	}
+	if v.ResultAccepted {
+		return nil
 	}
 	if e = postWorker(ctx, cfg.RelayURL, key, "/jobs/result", v.Completion, nil); e != nil {
 		return e
@@ -215,10 +238,26 @@ func cachedOutbox(cfg config, id, lease string) (bool, error) {
 	if json.Unmarshal(b, &v) != nil {
 		return false, errors.New("invalid_outbox")
 	}
+	if e = restoreOutboxTurn(cfg, v); e != nil {
+		return false, e
+	}
 	if !v.ResultAccepted {
 		v.Task.Lease = lease
 		v.Completion.Lease = lease
 		e = metadb.WriteJSON(path, v)
 	}
 	return true, e
+}
+
+func restoreOutboxTurn(cfg config, v resultOutbox) error {
+	if v.Turn == nil {
+		return nil
+	} // Backwards compatible with older outboxes.
+	if cfg.threads == nil {
+		return errors.New("outbox_thread_store_unavailable")
+	}
+	if v.Turn.ConversationID != v.Task.ConversationID || v.Turn.JobID != v.Task.ID {
+		return errors.New("outbox_turn_mismatch")
+	}
+	return cfg.threads.Save(*v.Turn)
 }

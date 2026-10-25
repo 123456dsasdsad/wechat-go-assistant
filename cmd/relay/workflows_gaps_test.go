@@ -15,7 +15,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 )
 
-func TestMaterialDraftContinuesAcrossSessionSwitchAndStoreRestart(t *testing.T) {
+func TestMaterialDraftStaysInOriginalSessionAcrossSwitchAndRestart(t *testing.T) {
 	defer metadb.CloseAll()
 	in := quoteFixture(t)
 	dir := filepath.Join(t.TempDir(), "materials")
@@ -44,7 +44,7 @@ func TestMaterialDraftContinuesAcrossSessionSwitchAndStoreRestart(t *testing.T) 
 	handle("two", "来源二：保留原始图表")
 	handle("cancel", "取消收集")
 	p, err = in.materials.Get(in.owner, p.ID)
-	if err != nil || p.State != "saved" || p.Conversation != a || len(p.Entries) != 2 {
+	if err != nil || p.State != "collecting" || p.Conversation != a || len(p.Entries) != 1 {
 		t.Fatal(p, err)
 	}
 	if err = in.materials.Close(); err != nil {
@@ -54,16 +54,18 @@ func TestMaterialDraftContinuesAcrossSessionSwitchAndStoreRestart(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	handle("return-a", "继续会话 "+a)
 	handle("resume", "继续收集 "+p.ID[:8])
 	handle("three", "来源三：下周讨论")
 	handle("finish", "发完了")
 	p, err = in.materials.Get(in.owner, p.ID)
-	if err != nil || p.State != "saved" || p.Conversation != a || len(p.Entries) != 3 || len(in.queue.History()) != 0 || in.sessions.Current().ID != b {
+	if err != nil || p.State != "saved" || p.Conversation != a || len(p.Entries) != 2 || len(in.queue.History()) != 1 || in.sessions.Current().ID != a {
 		t.Fatal("draft or conversation was lost, or collection called AI", p, err)
 	}
+	handle("return-b", "继续会话 "+b)
 	handle("submit", "处理材料 "+p.ID[:8]+"：总结原文")
 	rows := in.queue.History()
-	if len(rows) != 1 || rows[0].ConversationID != a || in.sessions.Current().ID != b {
+	if len(rows) != 2 || rows[1].ConversationID != a || rows[0].ConversationID != b || in.sessions.Current().ID != b {
 		t.Fatal("submission followed the selected session rather than the material session", rows)
 	}
 }

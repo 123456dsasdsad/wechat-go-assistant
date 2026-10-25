@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/conversations"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/materials"
 	"github.com/123456dsasdsad/wechat-go-assistant/weixin"
 	"strconv"
@@ -43,8 +45,11 @@ func (in *inbound) projectCommand(ctx context.Context, msg weixin.Message, input
 		if existing, e := in.materials.Project(owner, title); e == nil {
 			return reply("项目已存在：" + existing.Title + "。发送“加入项目 " + title + "”关联当前会话。")
 		}
-		p, e := in.materials.SaveProject(materials.Project{Owner: owner, Title: title, Conversations: []string{in.sessions.Current().ID}, Topics: []string{}})
+		p, e := in.materials.SaveProject(materials.Project{Owner: owner, Title: title, Conversations: []string{in.currentID(ctx)}, Topics: []string{}})
 		if e != nil {
+			return reply(e.Error())
+		}
+		if e = in.bindProjectIdentity(in.currentID(ctx), p); e != nil {
 			return reply(e.Error())
 		}
 		return reply("已创建项目“" + p.Title + "”，已关联当前会话。创建不调用 AI。")
@@ -54,7 +59,7 @@ func (in *inbound) projectCommand(ctx context.Context, msg weixin.Message, input
 		if e != nil {
 			return reply(e.Error())
 		}
-		cid := in.sessions.Current().ID
+		cid := in.currentID(ctx)
 		found := false
 		for _, v := range p.Conversations {
 			if v == cid {
@@ -67,7 +72,10 @@ func (in *inbound) projectCommand(ctx context.Context, msg weixin.Message, input
 		if _, e = in.materials.SaveProject(p); e != nil {
 			return reply(e.Error())
 		}
-		if draft, ok, _ := in.materials.Active(owner); ok {
+		if e = in.bindProjectIdentity(cid, p); e != nil {
+			return reply(e.Error())
+		}
+		if draft, ok, _ := in.materials.Active(owner, in.currentID(ctx)); ok {
 			if _, e = in.materials.Bind(owner, draft.ID, p.ID); e != nil {
 				return reply(e.Error())
 			}
@@ -117,4 +125,14 @@ func (in *inbound) projectSummary(owner string, p materials.Project) string {
 	}
 	b.WriteString("管理页面 → 材料与项目：查看材料原文、文件、执行过程和结果。")
 	return b.String()
+}
+
+func (in *inbound) bindProjectIdentity(cid string, p materials.Project) error {
+	v, ok := in.sessions.Get(cid)
+	if !ok {
+		return errors.New("conversation_unavailable")
+	}
+	// An explicitly joined project supplies identity without changing the filesystem root.
+	v.Profile.Identity = conversations.Identity{App: "wechat-assistant", ProjectID: p.ID, ProjectName: p.Title}
+	return in.sessions.UpdateProfile(cid, v.Profile)
 }

@@ -37,6 +37,24 @@ func HandlerWithOutputs(s *Store, key string, fileStore, outputStore *files.Stor
 			}
 		}
 		switch {
+		case r.Method == "POST" && r.URL.Path == "/nodes/heartbeat":
+			var n NodeHeartbeat
+			if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&n) != nil {
+				http.Error(w, "invalid node", 400)
+				return
+			}
+			if e := s.RegisterNode(n, time.Now()); e != nil {
+				http.Error(w, "node rejected", 409)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		case r.Method == "GET" && r.URL.Path == "/nodes":
+			n, e := s.Nodes()
+			if e != nil {
+				http.Error(w, "nodes unavailable", 503)
+				return
+			}
+			json.NewEncoder(w).Encode(n)
 		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/jobs/training/"):
 			var e error
 			var result any = map[string]bool{"ok": true}
@@ -183,7 +201,14 @@ func HandlerWithOutputs(s *Store, key string, fileStore, outputStore *files.Stor
 			}
 			json.NewEncoder(w).Encode(map[string]any{"ok": healthy, "model": choice.Model, "effort": choice.Effort})
 		case r.Method == "POST" && r.URL.Path == "/jobs/claim":
-			task, err := s.Claim(time.Now())
+			var claimant Claimant
+			if r.ContentLength != 0 {
+				if e := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&claimant); e != nil && e != io.EOF {
+					http.Error(w, "invalid claimant", 400)
+					return
+				}
+			}
+			task, err := s.ClaimFrom(time.Now(), claimant)
 			if err != nil {
 				http.Error(w, "storage error", 500)
 				return

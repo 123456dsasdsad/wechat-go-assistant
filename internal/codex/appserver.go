@@ -33,16 +33,23 @@ type rpcMessage struct {
 
 func runAppServer(ctx context.Context, c Config, prompt string) (result Result, retErr error) {
 	args := append([]string{"app-server"}, questionArgs(c.QuestionMCP)...)
+	args = isolatedStateArgs(c, args)
 	cmd := exec.Command(c.Binary, args...)
 	cmd.Dir = c.Directory
 	cmd.Stderr = io.Discard
 	for _, v := range os.Environ() {
 		n := strings.SplitN(v, "=", 2)[0]
+		if c.IsolateState && strings.EqualFold(n, "CODEX_SQLITE_HOME") {
+			continue
+		}
 		if n != "CODEX_HOME" && n != "COCKPIT_API_KEY" && n != "OPENAI_API_KEY" && n != "CODEX_API_KEY" {
 			cmd.Env = append(cmd.Env, v)
 		}
 	}
 	cmd.Env = append(cmd.Env, "CODEX_HOME="+c.Home, "COCKPIT_API_KEY="+c.Key)
+	if c.IsolateState {
+		cmd.Env = append(cmd.Env, "CODEX_SQLITE_HOME="+c.Home)
+	}
 	cmd.Env = append(cmd.Env, questionEnv(c.QuestionMCP)...)
 	configureProcess(cmd)
 	input, e := cmd.StdinPipe()

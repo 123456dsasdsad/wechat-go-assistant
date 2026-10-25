@@ -8,14 +8,12 @@ def submit_task(gateway, c, attempt):
     project = c.execute('SELECT * FROM projects WHERE id=?', (attempt['project_id'],)).fetchone()
     cid = project['learning_conversation']
     if not cid:
-        before = gateway.snapshot()
-        gateway.call('conversation', input='新建会话 研序写作导师-' + attempt['project_id'][:8])
-        cid = gateway.snapshot()['current']
+        source = hashlib.sha256(('research-tutor:' + attempt['project_id']).encode()).hexdigest()[:24]
+        cid = gateway.call('conversation_create', source=source, name='研序写作导师-' + attempt['project_id'][:8])['conversation']
         c.execute('UPDATE projects SET learning_conversation=? WHERE id=?', (cid, attempt['project_id'])); c.commit()
-        if before.get('current') and before['current'] != cid:
-            gateway.call('conversation', input='继续会话 ' + before['current'])
     fallback = attempt.get('fallback_count',0)>0
-    gateway.call('profile', conversation=cid, model='gpt-6-luna' if fallback else 'gpt-6.1-sol', effort='low' if fallback else 'medium', profile={})
+    gateway.call('identity', conversation=cid, profile={'app': 'research-writing', 'project_id': attempt['project_id'], 'project_name': '研序 · ' + project['title'][:70]})
+    gateway.call('model', conversation=cid, model='gpt-6-luna' if fallback else 'gpt-6.1-sol', effort='low' if fallback else 'medium')
     directory = (repo.DB.parent / 'writing-tutor').resolve()
     src = directory / (attempt['id'] + '.input.json')
     output = directory / (attempt['id'] + '.report.json')

@@ -63,6 +63,9 @@ func (in *inbound) workflowAction(owner, reply string, b workspaceRequest) (any,
 			p.Conversations = append(p.Conversations, cid)
 		}
 		p, e = in.materials.SaveProject(p)
+		if e == nil {
+			e = in.bindProjectIdentity(cid, p)
+		}
 		return p, true, e
 	case "material_start":
 		p, e := in.materials.Begin(owner, "portal:"+b.Source, b.Name, cid)

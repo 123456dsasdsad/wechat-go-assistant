@@ -14,13 +14,14 @@ import (
 const ChunkBytes = 4 << 20
 
 type Upload struct {
-	ID      string    `json:"id"`
-	Owner   string    `json:"-"`
-	Name    string    `json:"name"`
-	Size    int64     `json:"size"`
-	Offset  int64     `json:"offset"`
-	Created time.Time `json:"created"`
-	File    Ref       `json:"file"`
+	Conversation string    `json:"conversation,omitempty"`
+	ID           string    `json:"id"`
+	Owner        string    `json:"-"`
+	Name         string    `json:"name"`
+	Size         int64     `json:"size"`
+	Offset       int64     `json:"offset"`
+	Created      time.Time `json:"created"`
+	File         Ref       `json:"file"`
 }
 type uploadRecord struct {
 	Upload
@@ -42,7 +43,7 @@ func (s *Store) uploads() (map[string]uploadRecord, error) {
 	}
 	return m, nil
 }
-func (s *Store) BeginUpload(owner, key, name string, size int64) (Upload, error) {
+func (s *Store) BeginUpload(owner, key, name string, size int64, conversations ...string) (Upload, error) {
 	s.chunkMu.Lock()
 	defer s.chunkMu.Unlock()
 	if owner == "" || !validHex(key, 24) || !validName(name) || size < 0 {
@@ -52,9 +53,16 @@ func (s *Store) BeginUpload(owner, key, name string, size int64) (Upload, error)
 	if e != nil {
 		return Upload{}, e
 	}
+	conversation := ""
+	if len(conversations) > 0 {
+		conversation = conversations[0]
+	}
+	if conversation != "" && !validHex(conversation, 8) {
+		return Upload{}, errors.New("invalid_upload_conversation")
+	}
 	id := digest(owner + "\x00" + key)[:24]
 	if v, ok := m[id]; ok && s.now().Sub(v.Created) <= 7*24*time.Hour {
-		if v.OwnerID != owner || v.Name != name || v.Size != size {
+		if v.OwnerID != owner || v.Name != name || v.Size != size || v.Conversation != conversation {
 			return Upload{}, errors.New("upload_conflict")
 		}
 		return v.Upload, nil
@@ -72,10 +80,20 @@ func (s *Store) BeginUpload(owner, key, name string, size int64) (Upload, error)
 		return Upload{}, e
 	}
 	available, e := s.space(s.root)
-	if e != nil || available-ReserveDiskBytes < size {
+	remaining := int64(0)
+	for _, pending := range m {
+		if pending.File.ID == "" {
+			amount := pending.Size - pending.Offset
+			if amount < 0 || amount > available-remaining {
+				return Upload{}, errors.New("file_storage_full")
+			}
+			remaining += amount
+		}
+	}
+	if e != nil || available-ReserveDiskBytes-remaining < size {
 		return Upload{}, errors.New("file_storage_full")
 	}
-	v := Upload{ID: id, Name: name, Size: size, Created: s.now().UTC()}
+	v := Upload{Conversation: conversation, ID: id, Name: name, Size: size, Created: s.now().UTC()}
 	m[id] = uploadRecord{v, owner}
 	e = metadb.WriteJSON(s.uploadPath(), m)
 	return v, e
@@ -155,12 +173,7 @@ func (s *Store) FinishUpload(owner, id string) (Ref, error) {
 	if v.Offset != v.Size {
 		return Ref{}, errors.New("upload_incomplete")
 	}
-	f, e := os.OpenFile(filepath.Join(s.root, "chunks", id+".part"), os.O_CREATE|os.O_RDONLY, 0600)
-	if e != nil {
-		return Ref{}, e
-	}
-	defer f.Close()
-	ref, e := s.Save(owner, "chunk:"+id, v.Name, f)
+	ref, e := s.commitUpload(owner, v)
 	if e != nil {
 		return Ref{}, e
 	}
@@ -169,7 +182,6 @@ func (s *Store) FinishUpload(owner, id string) (Ref, error) {
 	if e = metadb.WriteJSON(s.uploadPath(), m); e != nil {
 		return Ref{}, e
 	}
-	f.Close()
 	os.Remove(filepath.Join(s.root, "chunks", id+".part"))
 	return ref, nil
 }

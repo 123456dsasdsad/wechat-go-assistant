@@ -43,13 +43,13 @@ func TestCollectionSurvivesRestartAndDeduplicates(t *testing.T) {
 	if _, e = s.Get("other", p.ID); e == nil {
 		t.Fatal("another owner read material")
 	}
-	if _, e = s.Begin("owner", "second", "其他材料", "bbbbbbbb"); e == nil {
+	if _, e = s.Begin("owner", "second", "其他材料", "aaaaaaaa"); e == nil {
 		t.Fatal("overlapping collectors accepted")
 	}
 	if _, e = s.Update("owner", p.ID, "saved", "", ""); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = s.Begin("owner", "second", "其他材料", "bbbbbbbb"); e != nil {
+	if _, e = s.Begin("owner", "second", "其他材料", "aaaaaaaa"); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = s.Update("owner", p.ID, "collecting", "", ""); e == nil {

@@ -65,15 +65,18 @@ type Ref struct {
 	SHA256 string `json:"sha256"`
 }
 type record struct {
+	RetainUntil time.Time `json:"retain_until,omitempty"`
 	Ref
-	Owner   string    `json:"owner"`
-	Source  string    `json:"source"`
-	Created time.Time `json:"created"`
+	Conversation string    `json:"conversation,omitempty"`
+	Owner        string    `json:"owner"`
+	Source       string    `json:"source"`
+	Created      time.Time `json:"created"`
 }
 type grant struct {
-	Owner   string    `json:"owner"`
-	Hash    string    `json:"hash"`
-	Expires time.Time `json:"expires"`
+	Conversation string    `json:"conversation,omitempty"`
+	Owner        string    `json:"owner"`
+	Hash         string    `json:"hash"`
+	Expires      time.Time `json:"expires"`
 }
 type state struct {
 	Version int               `json:"version"`
@@ -81,6 +84,7 @@ type state struct {
 	Grants  map[string]grant  `json:"grants"`
 }
 type Store struct {
+	writeMu  sync.Mutex
 	mu       sync.Mutex
 	chunkMu  sync.Mutex
 	root     string
@@ -187,20 +191,22 @@ func (s *Store) copyState() state {
 	return n
 }
 func (s *Store) Save(owner, source, name string, reader io.Reader) (Ref, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if owner == "" || source == "" || reader == nil || !validName(name) {
 		return Ref{}, errors.New("invalid_upload")
 	}
 	sourceID := digest(owner + "\x00" + source)
 	s.mu.Lock()
 	for _, r := range s.state.Files {
-		if r.Owner == owner && r.Source == sourceID && s.now().Sub(r.Created) <= 7*24*time.Hour {
+		if r.Owner == owner && r.Source == sourceID && s.alive(r) {
 			s.mu.Unlock()
 			return r.Ref, nil
 		}
 	}
 	active := 0
 	for _, r := range s.state.Files {
-		if s.now().Sub(r.Created) <= 7*24*time.Hour {
+		if s.alive(r) {
 			active++
 		}
 	}
@@ -245,13 +251,13 @@ func (s *Store) Save(owner, source, name string, reader io.Reader) (Ref, error) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, r := range s.state.Files {
-		if r.Owner == owner && r.Source == sourceID && s.now().Sub(r.Created) <= 7*24*time.Hour {
+		if r.Owner == owner && r.Source == sourceID && s.alive(r) {
 			return r.Ref, nil
 		}
 	}
 	next := s.copyState()
 	for id, r := range next.Files {
-		if s.now().Sub(r.Created) > 7*24*time.Hour {
+		if !s.alive(r) {
 			delete(next.Files, id)
 		}
 	}
@@ -280,7 +286,7 @@ func (s *Store) List(owner string) []Ref {
 	defer s.mu.Unlock()
 	var records []record
 	for _, r := range s.state.Files {
-		if r.Owner == owner && s.now().Sub(r.Created) <= 7*24*time.Hour {
+		if r.Owner == owner && s.alive(r) {
 			records = append(records, r)
 		}
 	}
@@ -298,7 +304,7 @@ func (s *Store) Get(owner, id string) (Ref, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.state.Files[id]
-	if !ok || r.Owner != owner || s.now().Sub(r.Created) > 7*24*time.Hour {
+	if !ok || r.Owner != owner || !s.alive(r) {
 		return Ref{}, errors.New("file_not_found")
 	}
 	return r.Ref, nil
@@ -307,7 +313,7 @@ func (s *Store) OpenBlob(ref Ref) (*os.File, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.state.Files[ref.ID]
-	if !ok || !ValidRef(ref) || r.Ref != ref || s.now().Sub(r.Created) > 7*24*time.Hour {
+	if !ok || !ValidRef(ref) || r.Ref != ref || !s.alive(r) {
 		return nil, errors.New("file_not_found")
 	}
 	return os.Open(filepath.Join(s.root, ref.ID+".bin"))
@@ -319,7 +325,7 @@ func (s *Store) Prune() error {
 	next := s.copyState()
 	var retired []string
 	for id, r := range next.Files {
-		if s.now().Sub(r.Created) > 7*24*time.Hour {
+		if !s.alive(r) {
 			delete(next.Files, id)
 			retired = append(retired, id)
 		}

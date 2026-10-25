@@ -119,7 +119,7 @@ func (in *inbound) materialCommand(ctx context.Context, msg weixin.Message, inpu
 	}
 	if strings.HasPrefix(input, "开始收集 ") {
 		title := strings.TrimSpace(strings.TrimPrefix(input, "开始收集 "))
-		p, e := in.materials.Begin(owner, msg.Key(), title, in.sessions.Current().ID)
+		p, e := in.materials.Begin(owner, msg.Key(), title, in.currentID(ctx))
 		if e != nil {
 			return fail(e)
 		}
@@ -132,6 +132,9 @@ func (in *inbound) materialCommand(ctx context.Context, msg weixin.Message, inpu
 				return fail(e)
 			}
 			if prefix == "继续收集 " {
+				if p.Conversation != in.currentID(ctx) {
+					return reply("这份材料属于另一会话。请先继续会话 " + p.Conversation + "，再继续收集。")
+				}
 				if p.State == "queued" || p.State == "submitted" {
 					return reply("这份材料已经提交。可以引用任务结果继续，或开始收集一份新材料。")
 				}
@@ -174,7 +177,7 @@ func (in *inbound) materialCommand(ctx context.Context, msg weixin.Message, inpu
 		}
 		return reply(v)
 	}
-	p, active, e := in.materials.Active(owner)
+	p, active, e := in.materials.Active(owner, in.currentID(ctx))
 	if e != nil {
 		return fail(e)
 	}

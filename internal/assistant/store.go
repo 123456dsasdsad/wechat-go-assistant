@@ -52,6 +52,15 @@ func Open(path string) (*Store, error) {
 }
 func (s *Store) Handle(owner, source, input, cid string, choice models.Choice, now time.Time) (bool, string, error) {
 	input = strings.TrimSpace(input)
+	global := false
+	if strings.HasPrefix(input, "全局记住 ") || strings.HasPrefix(input, "全局忘记 ") || input == "全局记忆列表" {
+		global = true
+		input = strings.TrimPrefix(input, "全局")
+	}
+	memoryOwner := owner
+	if !global && cid != "" {
+		memoryOwner = owner + "\x00session:" + cid
+	}
 	kind := ""
 	for _, prefix := range []string{"记忆列表", "偏好列表", "记忆帮助", "定时帮助", "定时列表", "定时任务 ", "每日任务 ", "取消定时 ", "记住 ", "忘记 "} {
 		if input == strings.TrimSpace(prefix) || strings.HasPrefix(input, prefix) {
@@ -83,11 +92,11 @@ func (s *Store) Handle(owner, source, input, cid string, choice models.Choice, n
 	argument := strings.TrimSpace(strings.TrimPrefix(input, kind))
 	switch kind {
 	case "记忆帮助":
-		reply = "记住 <名称> <内容>\n记忆列表\n忘记 <名称>\n这些偏好会用于后续任务，可随时查看和删除。"
+		reply = "记住 <名称> <内容>\n记忆列表\n忘记 <名称>\n默认仅用于当前会话。跨会话个人偏好请用“全局记住 <名称> <内容>”，查看用“全局记忆列表”，删除用“全局忘记 <名称>”。"
 	case "定时帮助":
 		reply = "定时任务 2026-10-09 09:00 <任务内容>\n每日任务 09:00 <任务内容>\n定时列表\n取消定时 <编号>\n使用北京时间，到点进入任务队列；执行时会调用创建计划时选择的模型。取消计划不终止已开始的任务。"
 	case "记忆列表", "偏好列表":
-		rows, err := tx.Query("SELECT name,value FROM preferences WHERE owner=? ORDER BY name LIMIT 32", owner)
+		rows, err := tx.Query("SELECT name,value FROM preferences WHERE owner=? ORDER BY name LIMIT 32", memoryOwner)
 		if err != nil {
 			return true, "", err
 		}
@@ -116,7 +125,7 @@ func (s *Store) Handle(owner, source, input, cid string, choice models.Choice, n
 			break
 		}
 		var count int
-		e = tx.QueryRow("SELECT count(*) FROM preferences WHERE owner=? AND name<>?", owner, parts[0]).Scan(&count)
+		e = tx.QueryRow("SELECT count(*) FROM preferences WHERE owner=? AND name<>?", memoryOwner, parts[0]).Scan(&count)
 		if e != nil {
 			return true, "", e
 		}
@@ -124,13 +133,13 @@ func (s *Store) Handle(owner, source, input, cid string, choice models.Choice, n
 			reply = "偏好最多保存 32 项，请先用“忘记 <名称>”删除一项。"
 			break
 		}
-		_, e = tx.Exec("INSERT INTO preferences VALUES(?,?,?) ON CONFLICT(owner,name) DO UPDATE SET value=excluded.value", owner, parts[0], strings.TrimSpace(parts[1]))
+		_, e = tx.Exec("INSERT INTO preferences VALUES(?,?,?) ON CONFLICT(owner,name) DO UPDATE SET value=excluded.value", memoryOwner, parts[0], strings.TrimSpace(parts[1]))
 		if e != nil {
 			return true, "", e
 		}
-		reply = "已保存偏好：" + parts[0] + "。后续任务生效。"
+		reply = "已保存偏好：" + parts[0] + "。当前范围内的后续任务生效。"
 	case "忘记":
-		result, err := tx.Exec("DELETE FROM preferences WHERE owner=? AND name=?", owner, argument)
+		result, err := tx.Exec("DELETE FROM preferences WHERE owner=? AND name=?", memoryOwner, argument)
 		if err != nil {
 			return true, "", err
 		}
@@ -250,13 +259,17 @@ func (s *Store) Handle(owner, source, input, cid string, choice models.Choice, n
 	return true, reply, nil
 }
 
-func (s *Store) MemoryText(owner string) string {
+func (s *Store) MemoryText(owner string, conversations ...string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.memoryText(owner)
+	return s.memoryText(owner, conversations...)
 }
-func (s *Store) memoryText(owner string) string {
-	rows, e := s.db.Query("SELECT name,value FROM preferences WHERE owner=? ORDER BY name LIMIT 32", owner)
+func (s *Store) memoryText(owner string, conversations ...string) string {
+	scope := owner
+	if len(conversations) > 0 && conversations[0] != "" {
+		scope = owner + "\x00session:" + conversations[0]
+	}
+	rows, e := s.db.Query("SELECT name,value FROM preferences WHERE owner IN (?,?) ORDER BY CASE WHEN owner=? THEN 0 ELSE 1 END,name LIMIT 64", owner, scope, owner)
 	if e != nil {
 		return ""
 	}
@@ -305,7 +318,7 @@ func (s *Store) Dispatch(now time.Time, enqueue func(Plan, string) (string, erro
 	}
 	for _, p := range plans {
 		source := fmt.Sprintf("schedule:%s:%s:%d", p.Owner, p.ID, p.Due)
-		p.Memory = s.memoryText(p.Owner)
+		p.Memory = s.memoryText(p.Owner, p.Conversation)
 		job, err := enqueue(p, source)
 		if err != nil {
 			return err

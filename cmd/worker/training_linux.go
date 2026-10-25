@@ -40,6 +40,34 @@ func launchTraining(cfg config, id string, resume bool, command string) error {
 	if e != nil {
 		return e
 	}
+	if cfg.TrainingLauncher == "detached" {
+		args := []string{"--training-run", "--config", cfg.ConfigPath, "--id", id}
+		if resume {
+			args = append(args, "--resume", "--command", command)
+		}
+		logDir := filepath.Join(cfg.WorkRoot, "training-launcher")
+		if e = os.MkdirAll(logDir, 0700); e != nil {
+			return e
+		}
+		log, e := os.OpenFile(filepath.Join(logDir, id+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if e != nil {
+			return e
+		}
+		c := exec.Command(exe, args...)
+		c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		c.Stdout = log
+		c.Stderr = log
+		e = c.Start()
+		log.Close()
+		if e != nil {
+			return e
+		}
+		go func() { _ = c.Wait() }()
+		return nil
+	}
+	if cfg.TrainingLauncher != "" && cfg.TrainingLauncher != "systemd" {
+		return fmt.Errorf("invalid_training_launcher")
+	}
 	unit := "campus-training-" + id
 	if command != "" {
 		unit += "-" + strings.NewReplacer(".", "-", ":", "-").Replace(command)

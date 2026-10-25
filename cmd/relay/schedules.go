@@ -21,7 +21,11 @@ func runSchedules(ctx context.Context, plans *assistant.Store, queue *jobs.Store
 			if err != nil || reply == "" {
 				return "", fmt.Errorf("schedule_context_unavailable")
 			}
-			j, err := queue.EnqueuePersonalized(source, p.Input, owner, reply, models.Choice{Model: p.Model, Effort: p.Effort}, nil, p.Conversation, p.Memory)
+			session, ok := sessions.Get(p.Conversation)
+			if !ok || session.Archived {
+				return "", fmt.Errorf("schedule_conversation_unavailable")
+			}
+			j, err := queue.EnqueuePersonalized(source, p.Input, owner, reply, models.Choice{Model: p.Model, Effort: p.Effort}, nil, p.Conversation, p.Memory, session.Profile)
 			if err != nil {
 				return "", err
 			}

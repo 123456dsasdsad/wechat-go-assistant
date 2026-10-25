@@ -12,6 +12,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if os.Getenv("CAMPUS_TEST_STATE_ISOLATION") == "1" {
+		args := strings.Join(os.Args[1:], "|")
+		if os.Getenv("CODEX_SQLITE_HOME") != os.Getenv("CODEX_HOME") || !strings.Contains(args, fmt.Sprintf("sqlite_home=%q", os.Getenv("CODEX_HOME"))) {
+			os.Exit(42)
+		}
+	}
 	if mode := os.Getenv("CAMPUS_TEST_RPC"); mode != "" {
 		fakeAppServer(mode)
 		os.Exit(0)
@@ -163,5 +169,26 @@ func TestRunnerTimeout(t *testing.T) {
 	_, err := Run(ctx, c, "prompt")
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 4*time.Second {
 		t.Fatalf("timeout not enforced: %v", err)
+	}
+}
+
+func TestIsolatedStateOverridesInheritedSQLiteLocation(t *testing.T) {
+	for _, appServer := range []bool{false, true} {
+		t.Run(fmt.Sprint(appServer), func(t *testing.T) {
+			c := testConfig(t, "good")
+			c.IsolateState = true
+			c.Home = t.TempDir()
+			c.AppServer = appServer
+			c.Permissions = ":danger-full-access"
+			c.Persistent = appServer
+			t.Setenv("CODEX_SQLITE_HOME", t.TempDir())
+			t.Setenv("CAMPUS_TEST_STATE_ISOLATION", "1")
+			if appServer {
+				t.Setenv("CAMPUS_TEST_RPC", "progress")
+			}
+			if _, err := Run(context.Background(), c, "check state"); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/jobs"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/library"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/models"
+	"github.com/123456dsasdsad/wechat-go-assistant/internal/processlock"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/userinput"
 	"github.com/123456dsasdsad/wechat-go-assistant/internal/workerpermits"
 	"io"
@@ -30,6 +31,11 @@ import (
 )
 
 type config struct {
+	IsolateCodexHomes           bool   `json:"isolate_codex_homes,omitempty"`
+	TrainingLauncher            string `json:"training_launcher,omitempty"`
+	NodeID                      string `json:"node_id,omitempty"`
+	NodeReady                   bool   `json:"node_ready,omitempty"`
+	nodeInstance                string
 	ConfigPath                  string `json:"-"`
 	RelayURL                    string `json:"relay_url"`
 	RelayKeyFile                string `json:"relay_key_file"`
@@ -51,6 +57,7 @@ type config struct {
 	ScholarKeysFile             string `json:"scholar_keys_file,omitempty"`
 	library                     *library.Store
 	permits                     *workerpermits.Pool
+	threads                     *conversations.Threads
 	MaxWaitingTasks             int    `json:"max_waiting_tasks,omitempty"`
 	TranscriptionCommand        string `json:"transcription_command,omitempty"`
 	TranscriptionTimeoutSeconds int    `json:"transcription_timeout_seconds,omitempty"`
@@ -174,10 +181,16 @@ func run(ctx context.Context) error {
 	if cfg.ThreadsFile == "" {
 		cfg.ThreadsFile = filepath.Join(filepath.Dir(cfg.ModelsFile), "conversations.json")
 	}
+	releaseWorker, e := processlock.Acquire(cfg.ThreadsFile + ".worker.lock")
+	if e != nil {
+		return errors.New("worker_state_is_owned_by_another_process")
+	}
+	defer releaseWorker()
 	threads, e := conversations.OpenThreads(cfg.ThreadsFile)
 	if e != nil {
 		return e
 	}
+	cfg.threads = threads
 	if cfg.LibraryRoot != "" {
 		cfg.library, e = library.Open(cfg.LibraryRoot)
 		if e != nil {
@@ -190,6 +203,10 @@ func run(ctx context.Context) error {
 		go libraryBackups(ctx, cfg)
 	}
 	fmt.Printf("{\"type\":\"worker_ready\",\"models\":%d,\"max_concurrent_tasks\":%d}\n", len(catalog.Models), cfg.MaxConcurrentTasks)
+	if e = prepareNode(&cfg); e != nil {
+		return e
+	}
+	go nodeHeartbeat(ctx, cfg, catalog, relayKey)
 	go trainingManager(ctx, cfg, relayKey)
 	go replayOutbox(ctx, cfg, relayKey)
 	if cfg.MaxWaitingTasks == 0 {
@@ -212,6 +229,7 @@ func run(ctx context.Context) error {
 // All slots share one synchronized native-thread store. Task state, clients,
 // heartbeats, questions and progress remain local to the execution slot.
 func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads *conversations.Threads, relayKey, apiKey string) error {
+	cfg.threads = threads
 	httpClient := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	call := func(endpoint string, body any, out any) (int, error) {
 		data, e := json.Marshal(body)
@@ -273,7 +291,7 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 			}
 		}
 		var task jobs.Task
-		status, e := call("/jobs/claim", nil, &task)
+		status, e := call("/jobs/claim", jobs.Claimant{Node: cfg.NodeID, Instance: cfg.nodeInstance}, &task)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -370,7 +388,7 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 				if !conversations.ValidProject(task.Project) {
 					return errors.New("invalid_project")
 				}
-				conversationDir = filepath.Join(cfg.WorkRoot, "projects", filepath.FromSlash(task.Project))
+				conversationDir = filepath.Join(cfg.WorkRoot, "projects", filepath.FromSlash(task.Project), "sessions", task.ConversationID)
 			}
 			dir = filepath.Join(conversationDir, "turns", task.ID)
 		}
@@ -445,6 +463,11 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 		prompt := buildTaskPrompt(task, cfg.Permissions, cfg.PythonBinary, inputs)
 		prompt += libraryContext(cfg, task)
 		nativeThread := threads.Thread(task.ConversationID)
+		nativeHome, homeErr := sessionHome(cfg, task.ConversationID, nativeThread)
+		if homeErr != nil {
+			cancel()
+			return homeErr
+		}
 		var steering codex.Steering
 		if cfg.LiveSteering {
 			steering = &relaySteering{url: cfg.RelayURL, key: relayKey, task: task}
@@ -460,7 +483,7 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 			questions.PermitKey = cfg.permits.Key
 		}
 		progress := newRelayProgress(taskCtx, cfg.RelayURL, relayKey, task)
-		result, runErr := codex.Run(runCtx, codex.Config{Binary: cfg.CodexBinary, Home: cfg.CodexHome, Directory: conversationDir, Key: apiKey, Model: task.Model, Effort: task.Effort, Persistent: task.ConversationID != "", ThreadID: nativeThread, Permissions: cfg.Permissions, AppServer: cfg.LiveSteering, Steering: steering, Questions: questions, QuestionMCP: questions, UsageBaseline: threads.Usage(task.ConversationID), Progress: progress.Publish}, prompt)
+		result, runErr := codex.Run(runCtx, codex.Config{Binary: cfg.CodexBinary, Home: nativeHome, IsolateState: nativeHome != cfg.CodexHome, Directory: conversationDir, Key: apiKey, Model: task.Model, Effort: task.Effort, Persistent: task.ConversationID != "", ThreadID: nativeThread, Permissions: cfg.Permissions, AppServer: cfg.LiveSteering, Steering: steering, Questions: questions, QuestionMCP: questions, UsageBaseline: threads.Usage(task.ConversationID), Progress: progress.Publish}, prompt)
 		progress.Close()
 		cancel()
 		if ctx.Err() != nil {
@@ -483,25 +506,25 @@ func workerLoop(ctx context.Context, cfg config, catalog models.Catalog, threads
 		if taskCtx.Err() != nil && runErr != nil {
 			completion.Error = "context_canceled"
 		}
-		outbox, outboxErr := queueResult(cfg, task, completion, dir)
-		if outboxErr != nil {
-			completion.Error = outboxErr.Error()
-			completion.Result = ""
-			outbox, outboxErr = queueResult(cfg, task, completion, dir)
-		}
-		if outboxErr != nil {
-			return outboxErr
-		}
-		completion = outbox.Completion
-
+		var turns []conversations.Turn
 		if task.ConversationID != "" {
 			threadID := result.ThreadID
 			if threadID == "" {
 				threadID = nativeThread
 			}
-			if e = threads.Save(conversations.Turn{ConversationID: task.ConversationID, JobID: task.ID, ThreadID: threadID, Usage: completion.Usage, Cumulative: result.Cumulative, Text: completion.Result, Error: completion.Error, ToolCount: completion.ToolCount, Outputs: completion.Outputs, SteerReceipts: completion.SteerReceipts}); e != nil {
-				return e
-			}
+			turns = append(turns, conversations.Turn{ConversationID: task.ConversationID, JobID: task.ID, ThreadID: threadID, Cumulative: result.Cumulative})
+		}
+		outbox, outboxErr := queueResult(cfg, task, completion, dir, turns...)
+		if outboxErr != nil {
+			completion.Error = outboxErr.Error()
+			completion.Result = ""
+			outbox, outboxErr = queueResult(cfg, task, completion, dir, turns...)
+		}
+		if outboxErr != nil {
+			return outboxErr
+		}
+		if e = restoreOutboxTurn(cfg, outbox); e != nil {
+			return e
 		}
 		e = acceptResult(ctx, cfg, relayKey, outbox)
 

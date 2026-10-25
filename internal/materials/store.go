@@ -71,7 +71,8 @@ func Open(root string) (*Store, error) {
 	for _, q := range []string{
 		`CREATE TABLE IF NOT EXISTS packs (id TEXT PRIMARY KEY,owner TEXT NOT NULL,state TEXT NOT NULL,updated INTEGER NOT NULL,document BLOB NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS packs_owner ON packs(owner,updated DESC)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS packs_active ON packs(owner) WHERE state='collecting'`,
+		`DROP INDEX IF EXISTS packs_active`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS packs_active_conversation ON packs(owner,COALESCE(json_extract(document,'$.conversation'),'')) WHERE state='collecting'`,
 		`CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY,owner TEXT NOT NULL,title TEXT NOT NULL,document BLOB NOT NULL,UNIQUE(owner,title))`,
 		`CREATE TABLE IF NOT EXISTS actions (pack TEXT PRIMARY KEY,owner TEXT NOT NULL,document BLOB NOT NULL)`,
 	} {
@@ -114,9 +115,16 @@ func (s *Store) Get(owner, id string) (Pack, error) {
 	defer s.mu.Unlock()
 	return s.get(owner, id)
 }
-func (s *Store) active(owner string) (Pack, bool, error) {
+func (s *Store) active(owner string, conversations ...string) (Pack, bool, error) {
 	var b []byte
-	e := s.db.QueryRow("SELECT document FROM packs WHERE owner=? AND state='collecting'", owner).Scan(&b)
+	query := "SELECT document FROM packs WHERE owner=? AND state='collecting'"
+	args := []any{owner}
+	if len(conversations) > 0 {
+		query += " AND COALESCE(json_extract(document,'$.conversation'),'')=?"
+		args = append(args, conversations[0])
+	}
+	query += " ORDER BY updated DESC LIMIT 1"
+	e := s.db.QueryRow(query, args...).Scan(&b)
 	if errors.Is(e, sql.ErrNoRows) {
 		return Pack{}, false, nil
 	}
@@ -127,10 +135,10 @@ func (s *Store) active(owner string) (Pack, bool, error) {
 	e = json.Unmarshal(b, &p)
 	return p, e == nil, e
 }
-func (s *Store) Active(owner string) (Pack, bool, error) {
+func (s *Store) Active(owner string, conversations ...string) (Pack, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.active(owner)
+	return s.active(owner, conversations...)
 }
 func (s *Store) Begin(owner, key, title, conversation string) (Pack, error) {
 	s.mu.Lock()
@@ -142,7 +150,7 @@ func (s *Store) Begin(owner, key, title, conversation string) (Pack, error) {
 	if p, e := s.get(owner, id); e == nil {
 		return p, nil
 	}
-	if _, ok, e := s.active(owner); e != nil {
+	if _, ok, e := s.active(owner, conversation); e != nil {
 		return Pack{}, e
 	} else if ok {
 		return Pack{}, errors.New("material_collection_already_active")
@@ -222,7 +230,7 @@ func (s *Store) Update(owner, id, state, job, instruction string) (Pack, error) 
 		return p, errors.New("material_instruction_too_long")
 	}
 	if state == "collecting" {
-		if other, ok, e := s.active(owner); e != nil {
+		if other, ok, e := s.active(owner, p.Conversation); e != nil {
 			return p, e
 		} else if ok && other.ID != id {
 			return p, errors.New("material_collection_already_active")

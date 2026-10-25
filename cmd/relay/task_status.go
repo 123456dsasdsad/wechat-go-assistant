@@ -12,6 +12,9 @@ import (
 )
 
 func taskStatusLabel(j jobs.Job) string {
+	if j.WorkerID != "" && j.Status == "running" && time.Now().After(j.LeaseUntil) {
+		return "执行节点失联，等待核对执行状态（未自动重跑）"
+	}
 	if j.Training.State == "running" {
 		return "训练运行中（校园进程独立执行）"
 	}

@@ -18,7 +18,7 @@ func TestMemoryScopesCommandsAndReopen(t *testing.T) {
 	}
 	choice := models.Choice{Model: "gpt-6.1-sol", Effort: "high"}
 	handled, reply, e := s.Handle("owner", "message", "记住 绘图 中文标签", "aaaaaaaa", choice, time.Now())
-	if !handled || e != nil || reply == "" || s.MemoryText("owner") == "" || s.MemoryText("other") != "" {
+	if !handled || e != nil || reply == "" || s.MemoryText("owner", "aaaaaaaa") == "" || s.MemoryText("other") != "" {
 		t.Fatal(reply, e)
 	}
 	_, again, e := s.Handle("owner", "message", "记住 绘图 英文标签", "aaaaaaaa", choice, time.Now())
@@ -26,11 +26,11 @@ func TestMemoryScopesCommandsAndReopen(t *testing.T) {
 		t.Fatal("replay changed preference")
 	}
 	s, e = Open(path)
-	if e != nil || s.MemoryText("owner") == "" {
+	if e != nil || s.MemoryText("owner", "aaaaaaaa") == "" {
 		t.Fatal("memory lost", e)
 	}
 	_, _, e = s.Handle("owner", "forget", "忘记 绘图", "aaaaaaaa", choice, time.Now())
-	if e != nil || s.MemoryText("owner") != "" {
+	if e != nil || s.MemoryText("owner", "aaaaaaaa") != "" {
 		t.Fatal("delete failed", e)
 	}
 }

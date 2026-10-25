@@ -127,7 +127,7 @@ func PublicHandler(store *Store, publicURL string, analyze ...AnalyzeFunc) (http
 				http.Error(w, "上传暂时失败，请重试。", 500)
 				return
 			}
-			ref, err := store.Save(owner, "web:"+hex.EncodeToString(source[:]), name, &singleUpload{part: part, next: func() error { _, e := multipart.NextPart(); return e }})
+			ref, err := store.SaveScoped(owner, "web:"+hex.EncodeToString(source[:]), name, &singleUpload{part: part, next: func() error { _, e := multipart.NextPart(); return e }}, store.GrantScope(cookie.Value))
 			if err != nil {
 				if err.Error() == "file_storage_full" {
 					http.Error(w, "服务器剩余空间不足，或文件数量已满。请清理后重试。", 507)

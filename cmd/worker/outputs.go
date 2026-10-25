@@ -43,6 +43,8 @@ func buildTaskPrompt(task jobs.Task, permissions, python string, inputs []map[st
 	}
 	if task.ConversationID != "" {
 		prompt += "\n本轮任务文件目录：turns/" + task.ID + "。用户提到 fixture.txt 时指本轮任务文件目录中的 fixture.txt。本会话以前轮次的文件也在 turns 下，可以根据历史上下文继续读取。"
+		identity, _ := json.Marshal(task.Identity)
+		prompt += "\n会话身份由系统绑定：conversation_id=" + task.ConversationID + "，项目身份=" + string(identity) + "。身份非空时，本轮未指定项目的‘系统、项目、检查bug’均指该绑定项目；不得混用其他会话的项目或要求用户重复选择已绑定项目。身份为空时只能依据本会话材料确认项目，不能从其他会话猜测。项目共享目录与本会话 turns 不相同；没有明确授权不得读取其他会话的历史。"
 	}
 	if len(inputs) > 0 {
 		metadata, _ := json.Marshal(inputs)

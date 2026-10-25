@@ -81,6 +81,7 @@ func (s *Store) Retry(owner, id, source, reply string) (Job, error) {
 		j.LibraryTopics = append([]string(nil), parent.LibraryTopics...)
 		j.Memory = parent.Memory
 		j.Project = parent.Project
+		j.Identity = parent.Identity
 		j.BudgetUSD = parent.BudgetUSD
 		e = s.save(j)
 	}

@@ -21,69 +21,73 @@ import (
 )
 
 type Job struct {
-	Kind                 string         `json:"kind,omitempty"`
-	LibraryID            string         `json:"library_id,omitempty"`
-	LibraryTopics        []string       `json:"library_topics,omitempty"`
-	TrainingResult       string         `json:"training_result,omitempty"`
-	ExpectedOutputs      []OutputIntent `json:"expected_outputs,omitempty"`
-	OutputPending        bool           `json:"output_pending,omitempty"`
-	Training             Training       `json:"training"`
-	Initialized          bool           `json:"initialized,omitempty"`
-	CancelRequested      bool           `json:"cancel_requested,omitempty"`
-	ParentID             string         `json:"parent_id,omitempty"`
-	Project              string         `json:"project,omitempty"`
-	BudgetReached        bool           `json:"budget_reached,omitempty"`
-	BudgetUSD            float64        `json:"budget_usd,omitempty"`
-	Usage                usage.Tokens   `json:"usage"`
-	Memory               string         `json:"memory,omitempty"`
-	Questions            []UserQuestion `json:"questions,omitempty"`
-	ID                   string         `json:"id"`
-	Input                string         `json:"input"`
-	Model                string         `json:"model"`
-	Effort               string         `json:"effort"`
-	Owner                string         `json:"owner"`
-	ReplyContext         string         `json:"reply_context"`
-	Status               string         `json:"status"`
-	Created              time.Time      `json:"created"`
-	Lease                string         `json:"lease,omitempty"`
-	LeaseUntil           time.Time      `json:"lease_until,omitempty"`
-	Attempts             int            `json:"attempts"`
-	Result               string         `json:"result,omitempty"`
-	Progress             string         `json:"progress,omitempty"`
-	ProgressSequence     uint64         `json:"progress_sequence,omitempty"`
-	ProgressUpdated      time.Time      `json:"progress_updated,omitempty"`
-	Error                string         `json:"error,omitempty"`
-	ToolCount            int            `json:"tool_count"`
-	Attachments          []files.Ref    `json:"attachments,omitempty"`
-	ConversationID       string         `json:"conversation_id,omitempty"`
-	LeaseRenewals        int            `json:"lease_renewals,omitempty"`
-	Outputs              []files.Ref    `json:"outputs,omitempty"`
-	DeliveryParts        []string       `json:"delivery_parts,omitempty"`
-	DeliveryText         string         `json:"delivery_text,omitempty"`
-	MediaRequested       bool           `json:"media_requested,omitempty"`
-	MediaDeferred        bool           `json:"media_deferred,omitempty"`
-	MediaReplyContext    string         `json:"media_reply_context,omitempty"`
-	MediaPackage         files.Ref      `json:"media_package,omitempty"`
-	MediaPackageRequired bool           `json:"media_package_required,omitempty"`
-	VerificationOnly     bool           `json:"verification_only,omitempty"`
-	Supplements          []Supplement   `json:"supplements,omitempty"`
+	WorkerID             string                 `json:"worker_id,omitempty"`
+	WorkerInstance       string                 `json:"worker_instance,omitempty"`
+	Identity             conversations.Identity `json:"identity,omitzero"`
+	Kind                 string                 `json:"kind,omitempty"`
+	LibraryID            string                 `json:"library_id,omitempty"`
+	LibraryTopics        []string               `json:"library_topics,omitempty"`
+	TrainingResult       string                 `json:"training_result,omitempty"`
+	ExpectedOutputs      []OutputIntent         `json:"expected_outputs,omitempty"`
+	OutputPending        bool                   `json:"output_pending,omitempty"`
+	Training             Training               `json:"training"`
+	Initialized          bool                   `json:"initialized,omitempty"`
+	CancelRequested      bool                   `json:"cancel_requested,omitempty"`
+	ParentID             string                 `json:"parent_id,omitempty"`
+	Project              string                 `json:"project,omitempty"`
+	BudgetReached        bool                   `json:"budget_reached,omitempty"`
+	BudgetUSD            float64                `json:"budget_usd,omitempty"`
+	Usage                usage.Tokens           `json:"usage"`
+	Memory               string                 `json:"memory,omitempty"`
+	Questions            []UserQuestion         `json:"questions,omitempty"`
+	ID                   string                 `json:"id"`
+	Input                string                 `json:"input"`
+	Model                string                 `json:"model"`
+	Effort               string                 `json:"effort"`
+	Owner                string                 `json:"owner"`
+	ReplyContext         string                 `json:"reply_context"`
+	Status               string                 `json:"status"`
+	Created              time.Time              `json:"created"`
+	Lease                string                 `json:"lease,omitempty"`
+	LeaseUntil           time.Time              `json:"lease_until,omitempty"`
+	Attempts             int                    `json:"attempts"`
+	Result               string                 `json:"result,omitempty"`
+	Progress             string                 `json:"progress,omitempty"`
+	ProgressSequence     uint64                 `json:"progress_sequence,omitempty"`
+	ProgressUpdated      time.Time              `json:"progress_updated,omitempty"`
+	Error                string                 `json:"error,omitempty"`
+	ToolCount            int                    `json:"tool_count"`
+	Attachments          []files.Ref            `json:"attachments,omitempty"`
+	ConversationID       string                 `json:"conversation_id,omitempty"`
+	LeaseRenewals        int                    `json:"lease_renewals,omitempty"`
+	Outputs              []files.Ref            `json:"outputs,omitempty"`
+	DeliveryParts        []string               `json:"delivery_parts,omitempty"`
+	DeliveryText         string                 `json:"delivery_text,omitempty"`
+	MediaRequested       bool                   `json:"media_requested,omitempty"`
+	MediaDeferred        bool                   `json:"media_deferred,omitempty"`
+	MediaReplyContext    string                 `json:"media_reply_context,omitempty"`
+	MediaPackage         files.Ref              `json:"media_package,omitempty"`
+	MediaPackageRequired bool                   `json:"media_package_required,omitempty"`
+	VerificationOnly     bool                   `json:"verification_only,omitempty"`
+	Supplements          []Supplement           `json:"supplements,omitempty"`
 }
 
 type Task struct {
-	Kind           string      `json:"kind,omitempty"`
-	LibraryID      string      `json:"library_id,omitempty"`
-	LibraryTopics  []string    `json:"library_topics,omitempty"`
-	Owner          string      `json:"owner,omitempty"`
-	Project        string      `json:"project,omitempty"`
-	BudgetUSD      float64     `json:"budget_usd,omitempty"`
-	Memory         string      `json:"memory,omitempty"`
-	ID             string      `json:"id"`
-	Input          string      `json:"input"`
-	Model          string      `json:"model"`
-	Effort         string      `json:"effort"`
-	Lease          string      `json:"lease"`
-	Attachments    []files.Ref `json:"attachments,omitempty"`
-	ConversationID string      `json:"conversation_id,omitempty"`
+	Identity       conversations.Identity `json:"identity,omitzero"`
+	Kind           string                 `json:"kind,omitempty"`
+	LibraryID      string                 `json:"library_id,omitempty"`
+	LibraryTopics  []string               `json:"library_topics,omitempty"`
+	Owner          string                 `json:"owner,omitempty"`
+	Project        string                 `json:"project,omitempty"`
+	BudgetUSD      float64                `json:"budget_usd,omitempty"`
+	Memory         string                 `json:"memory,omitempty"`
+	ID             string                 `json:"id"`
+	Input          string                 `json:"input"`
+	Model          string                 `json:"model"`
+	Effort         string                 `json:"effort"`
+	Lease          string                 `json:"lease"`
+	Attachments    []files.Ref            `json:"attachments,omitempty"`
+	ConversationID string                 `json:"conversation_id,omitempty"`
 }
 type Completion struct {
 	ExpectedOutputs []OutputIntent `json:"expected_outputs,omitempty"`
@@ -102,6 +106,7 @@ type Store struct {
 	dir     string
 	db      *sql.DB
 	readErr error
+	nodes   map[string]NodePolicy
 }
 
 func Open(dir string) (*Store, error) {
@@ -174,10 +179,28 @@ func (s *Store) enqueue(source, input, owner, replyContext string, choice models
 	j.ConversationID = conversationID
 	return j, s.save(j)
 }
-func (s *Store) ordered() []Job { return s.query("1=1") }
-func (s *Store) Claim(now time.Time) (*Task, error) {
+func (s *Store) ordered() []Job                     { return s.query("1=1") }
+func (s *Store) Claim(now time.Time) (*Task, error) { return s.ClaimFrom(now, Claimant{}) }
+func (s *Store) ClaimFrom(now time.Time, claimant Claimant) (*Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var nodes []NodeHeartbeat
+	if len(s.nodes) > 0 {
+		var err error
+		nodes, err = s.nodeRows()
+		if err != nil {
+			return nil, err
+		}
+		valid := false
+		for _, n := range nodes {
+			if n.ID == claimant.Node && n.Instance == claimant.Instance && n.Ready && now.Sub(n.Seen) >= 0 && now.Sub(n.Seen) < 45*time.Second && s.nodes[n.ID].Enabled {
+				valid = true
+			}
+		}
+		if !valid {
+			return nil, errors.New("node_not_ready")
+		}
+	}
 	for _, j := range s.query("status='running'") {
 		if j.CancelRequested && !now.Before(j.LeaseUntil) {
 			j.Status = "done"
@@ -196,7 +219,7 @@ func (s *Store) Claim(now time.Time) (*Task, error) {
 	}
 	active := map[string]bool{}
 	for _, j := range ordered {
-		if j.Status == "running" && now.Before(j.LeaseUntil) {
+		if j.Status == "running" && (now.Before(j.LeaseUntil) || len(s.nodes) > 0) {
 			active[j.Owner+"\x00"+j.ConversationID] = true
 		}
 	}
@@ -206,6 +229,22 @@ func (s *Store) Claim(now time.Time) (*Task, error) {
 		}
 		if j.Status != "queued" && (j.Status != "running" || now.Before(j.LeaseUntil)) {
 			continue
+		}
+		if len(s.nodes) > 0 {
+			if s.chooseNode(j, nodes, now) != claimant.Node {
+				continue
+			}
+			// A lost execution lease is not evidence that external side effects stopped.
+			// Keep this conversation blocked until the original worker delivers or an operator cancels it.
+			if j.Status == "running" {
+				continue
+			}
+			j.WorkerID, j.WorkerInstance = claimant.Node, claimant.Instance
+			if j.ConversationID != "" {
+				if _, err := s.db.Exec(`INSERT OR IGNORE INTO conversation_nodes VALUES(?,?,?)`, j.Owner, j.ConversationID, claimant.Node); err != nil {
+					return nil, err
+				}
+			}
 		}
 		cancelQuestions(&j)
 		if j.Attempts >= 2 {
@@ -237,6 +276,7 @@ func (s *Store) Claim(now time.Time) (*Task, error) {
 			return nil, err
 		}
 		t := &Task{Kind: j.Kind, LibraryID: j.LibraryID, LibraryTopics: append([]string(nil), j.LibraryTopics...), Project: j.Project, BudgetUSD: j.BudgetUSD, Memory: j.Memory, ID: j.ID, Input: j.Input, Model: j.Model, Effort: j.Effort, Lease: j.Lease, Attachments: append([]files.Ref(nil), j.Attachments...), ConversationID: j.ConversationID}
+		t.Identity = j.Identity
 		if j.Kind != "" {
 			t.Owner = j.Owner
 		}

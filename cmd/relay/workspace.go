@@ -474,7 +474,7 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 			}
 			refs = append(refs, ref)
 		}
-		j, e := in.enqueue("portal:"+b.Source, b.Input, owner, reply, b.Conversation, refs)
+		j, e := in.enqueue("portal:"+b.Source, b.Input, owner, reply, cid, refs)
 		return map[string]any{"ok": e == nil, "id": j.ID}, e
 	case "cancel", "retry", "resend":
 		j, e := in.queue.Find(owner, b.ID)
@@ -490,6 +490,20 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 			j, e = in.queue.RequestMedia(owner, j.ID, reply)
 		}
 		return map[string]any{"ok": e == nil, "id": j.ID}, e
+	case "conversation_create":
+		v, e := in.sessions.CreateBackground("portal:"+b.Source, b.Name)
+		return map[string]any{"ok": e == nil, "conversation": v.ID}, e
+	case "identity":
+		v, ok := in.sessions.Get(b.Conversation)
+		if !ok || v.Archived {
+			return nil, errors.New("conversation_unavailable")
+		}
+		if v.Profile.Identity != (conversations.Identity{}) && (v.Profile.App != b.Profile.App || v.Profile.ProjectID != b.Profile.ProjectID) {
+			return nil, errors.New("conversation_project_mismatch")
+		}
+		v.Profile.Identity = b.Profile.Identity
+		e := in.sessions.UpdateProfile(v.ID, v.Profile)
+		return map[string]bool{"ok": e == nil}, e
 	case "conversation":
 		handled, text, e := in.sessions.Handle("portal:"+b.Source, b.Input)
 		if !handled {
@@ -499,7 +513,7 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 	case "mark":
 		e := in.sessions.Mark(b.Conversation, b.Pinned, b.Archived)
 		return map[string]bool{"ok": e == nil}, e
-	case "profile":
+	case "profile", "model":
 		if _, ok := in.sessions.Get(b.Conversation); !ok {
 			return nil, errors.New("conversation_unavailable")
 		}
@@ -509,8 +523,10 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 		if !conversations.ValidProject(b.Profile.Project) {
 			return nil, errors.New("invalid_profile")
 		}
-		if e := in.sessions.UpdateProfile(b.Conversation, b.Profile); e != nil {
-			return nil, e
+		if b.Action == "profile" {
+			if e := in.sessions.UpdateProfile(b.Conversation, b.Profile); e != nil {
+				return nil, e
+			}
 		}
 		_, _, e := in.preferences.Handle(b.Source+":model", "默认模型 "+b.Model, b.Conversation)
 		if e == nil {
@@ -532,7 +548,15 @@ func (in *inbound) workspaceAction(owner string, b workspaceRequest, statePath s
 		b.Input = input
 		return in.workspaceAction(owner, b, statePath)
 	case "upload_begin":
-		return in.files.BeginUpload(owner, b.Source, b.Name, b.Size)
+		cid := b.Conversation
+		if cid == "" {
+			cid = in.sessions.Current().ID
+		}
+		v, ok := in.sessions.Get(cid)
+		if !ok || v.Archived {
+			return nil, errors.New("conversation_unavailable")
+		}
+		return in.files.BeginUpload(owner, b.Source, b.Name, b.Size, cid)
 	case "upload_finish":
 		return in.files.FinishUpload(owner, b.ID)
 	case "file_delete":

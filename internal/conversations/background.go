@@ -16,6 +16,11 @@ func (s *Store) CreateBackground(source, title string) (Session, error) {
 	}
 	h := sha256.Sum256([]byte("background:" + source))
 	key := hex.EncodeToString(h[:12])
+	for _, v := range s.state.Sessions {
+		if v.BackgroundSource == key {
+			return v, nil
+		}
+	}
 	for _, r := range s.state.Receipts {
 		if r.ID == key {
 			v, ok := s.state.Sessions[r.Reply]
@@ -32,6 +37,7 @@ func (s *Store) CreateBackground(source, title string) (Session, error) {
 	if e != nil {
 		return v, e
 	}
+	v.BackgroundSource = key
 	next := s.state
 	next.Sessions = map[string]Session{}
 	for k, x := range s.state.Sessions {
